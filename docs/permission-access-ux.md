@@ -16,7 +16,10 @@ every direct API call.
   reasons.
 - Explicit DENY wins over ALLOW at equal effective decision points.
 - Backend exposes permission definitions and membership/profile/access
-  administration routes. It does not expose one generic current-user
+  administration routes. `GET
+/api/v1/workspaces/:workspaceId/memberships/:membershipId/effective-access`
+  is a workspace permission-management inspection route that requires
+  `staff.permissions.manage`; it is not a universal current-user
   `can(permission)` endpoint for every frontend surface.
 
 ## Frontend Boundary
@@ -32,6 +35,13 @@ The Web layer fails closed:
 - stale session/workspace/support context is not allowed;
 - malformed or missing decisions are not allowed;
 - denied and unauthenticated are distinct states.
+
+`evaluateAccess` is a presentation normalizer over Backend effective decisions.
+It accepts `PermissionDecisionDto` facts that have already been evaluated by the
+Backend and maps them into UX states. It must not consume raw profiles, grants,
+roles, branch assignments, or relationship assignments to recompute Stage 4
+authorization in the browser. Contradictory or malformed effective facts are
+treated as unavailable and therefore not allowed.
 
 ## Identifier Strategy
 
@@ -58,6 +68,10 @@ Branch and relationship access require explicit scoped facts. Workspace access
 does not imply every branch, and trainer role labels do not imply relationship
 access.
 
+Stale means the access facts no longer match the current non-secret identity
+boundary: session generation, workspace id, or `user`/`support` cache context.
+WEB-010 does not invent a time-based permission TTL.
+
 ## Restricted Accounts
 
 `restrictedUntilVerified` is retained by WEB-009 auth state. WEB-010 does not
@@ -75,6 +89,8 @@ denied and exposes an accessible state description.
 `accessDeniedByBackend` converts a Backend 403 into a denied access result.
 Ordinary 403, validation, quota, and network errors do not log out the user.
 Only authenticated-session failures remain WEB-009 territory.
+Network or loading failures are reported as access unavailable, not as proof
+that Backend denied the user.
 
 ## Future Consumption
 

@@ -1,8 +1,22 @@
 import { isApiError, type ApiError, type ApiRequestOptions } from "@/lib/api";
-import { appQueryKeys, type AppQueryKey } from "@/lib/server-state";
+import {
+  appQueryKeys,
+  createQueryKey,
+  type AppQueryKey,
+} from "@/lib/server-state";
 import type { QueryClient } from "@tanstack/react-query";
-import type { PermissionDecisionDto, PermissionScopeDto } from "@/contracts";
-import type { MembershipId, WorkspaceId } from "@/contracts/common/ids";
+import {
+  isPermissionKey,
+  permissionEffects,
+  type PermissionDecisionDto,
+  type PermissionScopeDto,
+} from "@/contracts";
+import type {
+  BranchId,
+  MembershipId,
+  RelationshipId,
+  WorkspaceId,
+} from "@/contracts/common/ids";
 import type {
   AccessDecision,
   AccessFacts,
@@ -30,11 +44,16 @@ export function evaluateAccess(
     return decision("denied", false, requirement, "context-mismatch");
   }
 
-  const matching = (facts.decisions ?? []).filter(
+  const scoped = (facts.decisions ?? []).filter(
     (item) =>
       item.permission === requirement.permission &&
       scopeMatchesRequirement(item.scope, requirement),
   );
+  const matching = scoped.filter(isWellFormedDecision);
+
+  if (scoped.length > 0 && matching.length !== scoped.length) {
+    return decision("unavailable", false, requirement, "malformed");
+  }
 
   if (matching.length === 0) {
     return decision("denied", false, requirement, "unknown");
@@ -111,14 +130,39 @@ export function shouldLogoutForAccessError(error: unknown): boolean {
 
 export function createAccessQueryKey(input: {
   accessContext?: AccessRequirement["accessContext"];
+  branchId?: BranchId;
+  context?: AccessRequirement["context"];
   membershipId: MembershipId;
+  relationshipId?: RelationshipId;
   workspaceId: WorkspaceId;
 }): AppQueryKey {
+  const accessContext = input.accessContext ?? "user";
+  if (input.context === "PLATFORM") {
+    return createQueryKey(
+      "access",
+      "platform",
+      ...appQueryKeys.accessContext(accessContext),
+      {
+        membershipId: input.membershipId,
+      },
+    );
+  }
+
   return appQueryKeys.workspaceDetail(
     input.workspaceId,
     "effective-access",
-    input.membershipId,
-    input.accessContext ?? "user",
+    {
+      branchId: input.branchId ?? null,
+      membershipId: input.membershipId,
+      relationshipId: input.relationshipId ?? null,
+      scope:
+        input.relationshipId !== undefined
+          ? "relationship"
+          : input.branchId !== undefined
+            ? "branch"
+            : "workspace",
+    },
+    accessContext,
   );
 }
 
@@ -177,6 +221,19 @@ function decision(
     requirement,
     status,
   };
+}
+
+function isWellFormedDecision(
+  item: PermissionDecisionDto,
+): item is PermissionDecisionDto {
+  return (
+    isPermissionKey(item.permission) &&
+    typeof item.allowed === "boolean" &&
+    permissionEffects.includes(item.effect) &&
+    (item.source === "EXPLICIT_GRANT" ||
+      item.source === "PROFILE" ||
+      item.source === "NONE")
+  );
 }
 
 const placeholderRequirement: AccessRequirement = {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useId, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { AccessDecision } from "./types";
 
 export function AccessGate({
@@ -42,19 +42,21 @@ export function AccessControlledButton({
   disabledReason: string;
   loadingLabel: string;
 }) {
+  const generatedId = useId();
   const disabled = buttonProps.disabled === true || !decision.allowed;
   const label =
     decision.status === "unresolved" ? loadingLabel : disabledReason;
+  const stateId = `${buttonProps.id ?? generatedId}-access-state`;
 
   return (
     <button
       {...buttonProps}
-      aria-describedby={disabled ? `${buttonProps.id}-access-state` : undefined}
+      aria-describedby={disabled ? stateId : undefined}
       disabled={disabled}
     >
       {children}
       {disabled ? (
-        <span hidden id={`${buttonProps.id}-access-state`}>
+        <span hidden id={stateId}>
           {label}
         </span>
       ) : null}
