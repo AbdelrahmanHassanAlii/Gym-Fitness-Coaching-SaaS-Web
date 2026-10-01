@@ -23,7 +23,8 @@ export function LocaleSwitcher({ label, locale }: LocaleSwitcherProps) {
   function handleLocaleChange(event: ChangeEvent<HTMLSelectElement>) {
     const nextLocale = event.target.value as Locale;
     const direction = getLocaleDirection(nextLocale);
-    const secureCookie = window.location.protocol === "https:" ? "; Secure" : "";
+    const secureCookie =
+      window.location.protocol === "https:" ? "; Secure" : "";
 
     document.cookie = `${localeCookieName}=${nextLocale}; Path=/; Max-Age=${oneYearInSeconds}; SameSite=Lax${secureCookie}`;
     document.documentElement.lang = nextLocale;

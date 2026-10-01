@@ -37,10 +37,14 @@ const defaultLabels: ThemeControlsLabels = {
 };
 
 export function ThemeControls({ labels = defaultLabels }: ThemeControlsProps) {
-  const { appearance, resolvedAppearance, setAppearance, setTheme, theme } = useThemePreferences();
+  const { appearance, resolvedAppearance, setAppearance, setTheme, theme } =
+    useThemePreferences();
 
   return (
-    <form className="theme-controls" aria-label="Theme and appearance preview controls">
+    <form
+      className="theme-controls"
+      aria-label="Theme and appearance preview controls"
+    >
       <label className="theme-controls__field">
         <span>{labels.themeLabel}</span>
         <select
@@ -60,7 +64,9 @@ export function ThemeControls({ labels = defaultLabels }: ThemeControlsProps) {
         <span>{labels.appearanceLabel}</span>
         <select
           value={appearance}
-          onChange={(event) => setAppearance(event.target.value as AppearanceMode)}
+          onChange={(event) =>
+            setAppearance(event.target.value as AppearanceMode)
+          }
           aria-label={labels.appearanceLabel}
         >
           {appearances.map((appearanceMode) => (

@@ -16,10 +16,7 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
 
-  --font-sans:
-    Arial,
-    Helvetica,
-    sans-serif;
+  --font-sans: Arial, Helvetica, sans-serif;
   --font-size-sm: 0.875rem;
   --font-size-md: 1rem;
   --font-size-lg: 1.125rem;
@@ -223,10 +220,10 @@ textarea {
 .theme-controls__field select {
   appearance: none;
   background:
-    linear-gradient(45deg, transparent 50%, var(--color-foreground) 50%) calc(100% - 18px) 55% /
-      6px 6px no-repeat,
-    linear-gradient(135deg, var(--color-foreground) 50%, transparent 50%) calc(100% - 12px) 55% /
-      6px 6px no-repeat,
+    linear-gradient(45deg, transparent 50%, var(--color-foreground) 50%)
+      calc(100% - 18px) 55% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--color-foreground) 50%, transparent 50%)
+      calc(100% - 12px) 55% / 6px 6px no-repeat,
     var(--color-input);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

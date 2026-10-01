@@ -14,19 +14,27 @@ export const defaultAppearance: AppearanceMode = "system";
 const themeSet = new Set<string>(themes);
 const appearanceSet = new Set<string>(appearances);
 
-export function isThemeName(value: string | null | undefined): value is ThemeName {
+export function isThemeName(
+  value: string | null | undefined,
+): value is ThemeName {
   return typeof value === "string" && themeSet.has(value);
 }
 
-export function isAppearanceMode(value: string | null | undefined): value is AppearanceMode {
+export function isAppearanceMode(
+  value: string | null | undefined,
+): value is AppearanceMode {
   return typeof value === "string" && appearanceSet.has(value);
 }
 
-export function parseThemePreference(value: string | null | undefined): ThemeName {
+export function parseThemePreference(
+  value: string | null | undefined,
+): ThemeName {
   return isThemeName(value) ? value : defaultTheme;
 }
 
-export function parseAppearancePreference(value: string | null | undefined): AppearanceMode {
+export function parseAppearancePreference(
+  value: string | null | undefined,
+): AppearanceMode {
   return isAppearanceMode(value) ? value : defaultAppearance;
 }
 

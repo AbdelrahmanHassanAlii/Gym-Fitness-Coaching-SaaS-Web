@@ -22,4 +22,36 @@ test.describe("public home smoke", () => {
 
     expect(scanResults.violations).toEqual([]);
   });
+
+  test("switches language and updates document direction", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+
+    await page.getByLabel("Interface language").selectOption("ar");
+
+    await expect(page.locator("html")).toHaveAttribute("lang", "ar");
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    await expect(
+      page.getByRole("heading", { name: "منصة حسن للجيم والتدريب" }),
+    ).toBeVisible();
+  });
+
+  test("switches theme and appearance preferences", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByLabel("Theme", { exact: true }).selectOption("pulse");
+    await page.getByLabel("Appearance", { exact: true }).selectOption("dark");
+
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "pulse");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-appearance",
+      "dark",
+    );
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-resolved-appearance",
+      "dark",
+    );
+  });
 });

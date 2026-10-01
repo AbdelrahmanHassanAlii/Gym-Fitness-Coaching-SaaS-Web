@@ -18,11 +18,7 @@ vi.mock("next/navigation", () => ({
 
 describe("public home page", () => {
   test("renders the current web foundation message", async () => {
-    render(
-      <ThemeProvider>
-        {await Home()}
-      </ThemeProvider>,
-    );
+    render(<ThemeProvider>{await Home()}</ThemeProvider>);
 
     expect(
       screen.getByRole("heading", {

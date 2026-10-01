@@ -19,7 +19,10 @@ export default async function Home() {
           {publicHome.title}
         </h1>
         <p className={styles.copy}>{publicHome.copy}</p>
-        <div className={styles.swatches} aria-label={publicHome.tokenPreviewLabel}>
+        <div
+          className={styles.swatches}
+          aria-label={publicHome.tokenPreviewLabel}
+        >
           <div className={`${styles.swatch} ${styles.primary}`}>
             <strong>{publicHome.tokenLabels.primary}</strong>
           </div>

@@ -28,6 +28,8 @@ describe("locale model", () => {
   test("maps locales to document directions", () => {
     expect(getLocaleDirection("ar")).toBe("rtl");
     expect(getLocaleDirection("en")).toBe("ltr");
-    expect(Object.keys(localeDirections).sort()).toEqual([...supportedLocales].sort());
+    expect(Object.keys(localeDirections).sort()).toEqual(
+      [...supportedLocales].sort(),
+    );
   });
 });

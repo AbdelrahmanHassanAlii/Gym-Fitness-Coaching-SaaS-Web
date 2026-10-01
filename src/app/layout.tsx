@@ -28,7 +28,9 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={direction} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: getThemeBootstrapScript() }} />
+        <script
+          dangerouslySetInnerHTML={{ __html: getThemeBootstrapScript() }}
+        />
       </head>
       <body>
         <ThemeProvider>{children}</ThemeProvider>

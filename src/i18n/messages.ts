@@ -9,8 +9,7 @@ export const messages = {
     publicHome: {
       eyebrow: "أساس الويب",
       title: "منصة حسن للجيم والتدريب",
-      copy:
-        "أساس تطبيق Next.js جاهز لواجهات طاقم الجيم، والمنصة، وتسجيل الدخول القادمة.",
+      copy: "أساس تطبيق Next.js جاهز لواجهات طاقم الجيم، والمنصة، وتسجيل الدخول القادمة.",
       tokenPreviewLabel: "معاينة رموز الألوان الدلالية",
       tokenLabels: {
         danger: "خطر",
@@ -31,13 +30,13 @@ export const messages = {
   en: {
     metadata: {
       title: "Hassan Gym & Fitness Coaching SaaS",
-      description: "Web application foundation for Hassan Gym & Fitness Coaching SaaS.",
+      description:
+        "Web application foundation for Hassan Gym & Fitness Coaching SaaS.",
     },
     publicHome: {
       eyebrow: "Web foundation",
       title: "Hassan Gym & Fitness Coaching SaaS",
-      copy:
-        "The Next.js web application foundation is ready for the upcoming gym staff, platform, and authentication surfaces.",
+      copy: "The Next.js web application foundation is ready for the upcoming gym staff, platform, and authentication surfaces.",
       tokenPreviewLabel: "Semantic color token preview",
       tokenLabels: {
         danger: "Danger",

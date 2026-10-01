@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   APPEARANCE_STORAGE_KEY,
   THEME_STORAGE_KEY,
@@ -39,18 +46,22 @@ function systemPrefersDark(): boolean {
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<ThemeName>(defaultTheme);
-  const [appearance, setAppearanceState] = useState<AppearanceMode>(defaultAppearance);
+  const [appearance, setAppearanceState] =
+    useState<AppearanceMode>(defaultAppearance);
   const [systemIsDark, setSystemIsDark] = useState(false);
 
   useEffect(() => {
     // Browser storage is read after SSR; the bootstrap script has already applied root attributes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeState(parseThemePreference(readStorage(THEME_STORAGE_KEY)));
-    setAppearanceState(parseAppearancePreference(readStorage(APPEARANCE_STORAGE_KEY)));
+    setAppearanceState(
+      parseAppearancePreference(readStorage(APPEARANCE_STORAGE_KEY)),
+    );
     setSystemIsDark(systemPrefersDark());
 
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (event: MediaQueryListEvent) => setSystemIsDark(event.matches);
+    const handleChange = (event: MediaQueryListEvent) =>
+      setSystemIsDark(event.matches);
 
     media.addEventListener("change", handleChange);
     return () => media.removeEventListener("change", handleChange);
@@ -102,7 +113,8 @@ type ThemePreferenceContextValue = {
   theme: ThemeName;
 };
 
-const ThemePreferenceContext = createContext<ThemePreferenceContextValue | null>(null);
+const ThemePreferenceContext =
+  createContext<ThemePreferenceContextValue | null>(null);
 
 export function useThemePreferences(): ThemePreferenceContextValue {
   const context = useContext(ThemePreferenceContext);

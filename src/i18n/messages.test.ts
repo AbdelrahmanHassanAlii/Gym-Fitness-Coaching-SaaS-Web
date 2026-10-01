@@ -20,6 +20,8 @@ describe("translation messages", () => {
   });
 
   test("keeps Arabic and English message keys in parity", () => {
-    expect(flattenKeys(messages.ar).sort()).toEqual(flattenKeys(messages.en).sort());
+    expect(flattenKeys(messages.ar).sort()).toEqual(
+      flattenKeys(messages.en).sort(),
+    );
   });
 });
