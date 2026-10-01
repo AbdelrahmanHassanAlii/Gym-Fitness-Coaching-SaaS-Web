@@ -1,4 +1,5 @@
 import styles from "./page.module.css";
+import { ThemeControls } from "@/theme/ThemeControls";
 
 export default function Home() {
   return (
@@ -12,6 +13,21 @@ export default function Home() {
           The Next.js web application foundation is ready for the upcoming gym
           staff, platform, and authentication surfaces.
         </p>
+        <div className={styles.swatches} aria-label="Semantic color token preview">
+          <div className={`${styles.swatch} ${styles.primary}`}>
+            <strong>Primary</strong>
+          </div>
+          <div className={`${styles.swatch} ${styles.success}`}>
+            <strong>Success</strong>
+          </div>
+          <div className={`${styles.swatch} ${styles.warning}`}>
+            <strong>Warning</strong>
+          </div>
+          <div className={`${styles.swatch} ${styles.danger}`}>
+            <strong>Danger</strong>
+          </div>
+        </div>
+        <ThemeControls />
       </section>
     </main>
   );

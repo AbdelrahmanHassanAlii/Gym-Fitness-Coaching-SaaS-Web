@@ -68,6 +68,28 @@ need browser APIs, event handlers, or client-side state. Keep server-only config
 and future secrets behind server modules so they cannot be bundled into browser
 code.
 
+## Themes And Appearance
+
+WEB-003 defines a compact semantic token foundation in `src/app/globals.css`.
+Product code should consume semantic variables such as `--color-background`,
+`--color-foreground`, `--color-surface`, `--color-primary`, `--color-danger`,
+and `--color-focus` instead of raw palette colors.
+
+Theme and appearance are separate local preferences:
+
+- Theme key: `hassan-web-theme`
+- Appearance key: `hassan-web-appearance`
+
+The valid V1 themes are `summit`, `pulse`, and `forge`. The valid appearances
+are `light`, `dark`, and `system`. Invalid or stale stored values fall back to
+safe defaults. Preferences are local-only browser settings; no backend
+preference API is assumed.
+
+Root layout remains a Server Component. A small inline bootstrap script applies
+the stored theme and resolved appearance before hydration, while the client
+provider owns browser-only storage, OS color-scheme listeners, and interactive
+preference updates.
+
 ## Future Issue Ownership
 
 - WEB-003 owns semantic tokens, themes, and appearance modes.
