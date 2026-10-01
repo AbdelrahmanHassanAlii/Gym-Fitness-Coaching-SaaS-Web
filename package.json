@@ -5,12 +5,18 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "dev": "node ./node_modules/next/dist/bin/next dev",
+    "build": "node ./node_modules/next/dist/bin/next build",
+    "start": "node ./node_modules/next/dist/bin/next start",
+    "start:test": "node ./node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100",
+    "lint": "node ./node_modules/eslint/bin/eslint.js .",
+    "format": "node ./node_modules/prettier/bin/prettier.cjs --write .",
+    "format:check": "node ./node_modules/prettier/bin/prettier.cjs --check .",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "node ./node_modules/vitest/vitest.mjs",
+    "test:e2e": "bun run build && node ./node_modules/@playwright/test/cli.js test",
+    "validate": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run test:e2e && bun run build"
   },
   "dependencies": {
     "next": "16.3.8",
@@ -19,12 +25,19 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
     "@types/bun": "^1.3.2",
     "@types/node": "^24.6.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.36.0",
     "eslint-config-next": "16.3.8",
-    "typescript": "5.9.3"
+    "jsdom": "^30.1.1",
+    "prettier": "^3.9.9",
+    "typescript": "5.9.3",
+    "vitest": "^5.0.3"
   }
 }

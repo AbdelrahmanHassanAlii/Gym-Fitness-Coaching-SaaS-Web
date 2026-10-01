@@ -45,15 +45,20 @@ bun run dev
 
 ```bash
 bun run lint
+bun run format:check
 bun run typecheck
 bun run test
+bun run test:e2e
 bun run build
+bun run validate
 ```
 
-`bun run test` is currently a placeholder quality gate for WEB-001 and runs the
-repository-local Bun tests required by current foundation work. A larger test
-stack belongs to WEB-005.
+`bun run test` runs Vitest unit, component, and integration tests. `bun run
+test:e2e` builds the app and runs the Playwright browser smoke and accessibility
+checks against a local Next.js server. `bun run validate` runs the complete local
+quality gate.
 
 ## Architecture
 
 Repository conventions are documented in `docs/architecture.md`.
+Testing conventions are documented in `docs/testing.md`.

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { createPublicEnv, createServerEnv } from "./env.shared";
 
 describe("environment configuration", () => {
@@ -25,7 +25,9 @@ describe("environment configuration", () => {
       backendApiBaseUrl: "https://api.example.test/api/v1",
     });
 
-    expect(createServerEnv({ APP_ENV: "production", NODE_ENV: "production" })).toEqual({
+    expect(
+      createServerEnv({ APP_ENV: "production", NODE_ENV: "production" }),
+    ).toEqual({
       appEnv: "production",
       nodeEnv: "production",
     });
@@ -42,7 +44,11 @@ describe("environment configuration", () => {
 
   test("rejects invalid public backend URLs when provided", () => {
     expect(() =>
-      createPublicEnv({ NEXT_PUBLIC_BACKEND_API_BASE_URL: "localhost:3000/api/v1" }),
-    ).toThrow("NEXT_PUBLIC_BACKEND_API_BASE_URL must be an absolute HTTP(S) URL when provided");
+      createPublicEnv({
+        NEXT_PUBLIC_BACKEND_API_BASE_URL: "localhost:3000/api/v1",
+      }),
+    ).toThrow(
+      "NEXT_PUBLIC_BACKEND_API_BASE_URL must be an absolute HTTP(S) URL when provided",
+    );
   });
 });

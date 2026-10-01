@@ -1,4 +1,5 @@
-export type AppEnvironment = "local" | "development" | "test" | "staging" | "production";
+export type AppEnvironment =
+  "local" | "development" | "test" | "staging" | "production";
 
 const appEnvironments = new Set<AppEnvironment>([
   "local",
@@ -28,7 +29,10 @@ export type ServerEnv = {
   nodeEnv: string;
 };
 
-function parseAppEnvironment(value: string | undefined, fallback: AppEnvironment): AppEnvironment {
+function parseAppEnvironment(
+  value: string | undefined,
+  fallback: AppEnvironment,
+): AppEnvironment {
   if (value === undefined || value.trim() === "") {
     return fallback;
   }
@@ -40,7 +44,10 @@ function parseAppEnvironment(value: string | undefined, fallback: AppEnvironment
   throw new Error(`Invalid application environment: ${value}`);
 }
 
-function parseOptionalUrl(value: string | undefined, name: string): string | null {
+function parseOptionalUrl(
+  value: string | undefined,
+  name: string,
+): string | null {
   if (value === undefined || value.trim() === "") {
     return null;
   }
