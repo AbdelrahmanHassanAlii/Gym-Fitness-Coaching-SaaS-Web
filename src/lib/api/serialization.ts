@@ -12,6 +12,10 @@ export function normalizeApiPath(path: string): string {
     throw new Error("API request path must not be an absolute URL");
   }
 
+  if (/[\u0000-\u001f\\]/.test(path)) {
+    throw new Error("API request path contains unsupported characters");
+  }
+
   const withLeadingSlash = path.startsWith("/") ? path : `/${path}`;
 
   if (withLeadingSlash.includes("//")) {
@@ -94,5 +98,9 @@ function appendQueryValue(
     return;
   }
 
-  params.append(key, value === null ? "" : String(value));
+  if (value === null) {
+    throw new Error("API query null values require endpoint-specific handling");
+  }
+
+  params.append(key, String(value));
 }

@@ -39,20 +39,37 @@ describe("API transport foundation", () => {
     );
   });
 
-  test("serializes query arrays, booleans, numbers, nulls, and omits undefined", () => {
+  test("serializes query arrays, booleans, numbers, reserved characters, and omits undefined", () => {
     expect(
       serializeQueryParams({
-        cursor: "cursor-with+plus",
+        cursor: "opaque&cursor=with+plus/=",
         from: "2026-10-01",
-        include: ["a", "b"],
+        include: ["a", "b=ج"],
         missing: undefined,
-        nullable: null,
         ok: false,
         to: "2026-10-31T10:00:00Z",
         total: 2,
       }),
     ).toBe(
-      "cursor=cursor-with%2Bplus&from=2026-10-01&include=a&include=b&nullable=&ok=false&to=2026-10-31T10%3A00%3A00Z&total=2",
+      "cursor=opaque%26cursor%3Dwith%2Bplus%2F%3D&from=2026-10-01&include=a&include=b%3D%D8%AC&ok=false&to=2026-10-31T10%3A00%3A00Z&total=2",
+    );
+  });
+
+  test("rejects generic null query values without route-specific semantics", () => {
+    expect(() => serializeQueryParams({ nullable: null })).toThrow(
+      "null values require endpoint-specific handling",
+    );
+  });
+
+  test("rejects path oddities that could obscure URL intent", () => {
+    expect(() => composeApiUrl(baseUrl, "workspaces\\one")).toThrow(
+      "unsupported characters",
+    );
+    expect(() => composeApiUrl(baseUrl, "/workspaces/\u0000")).toThrow(
+      "unsupported characters",
+    );
+    expect(() => composeApiUrl(baseUrl, "http://evil.example/me")).toThrow(
+      "must not be an absolute URL",
     );
   });
 
@@ -72,6 +89,28 @@ describe("API transport foundation", () => {
     expect(calls[0].init?.method).toBe("PATCH");
     expect(calls[0].init?.body).toBe('{"expectedVersion":3}');
     expect(headerValue(calls[0], "content-type")).toBe("application/json");
+  });
+
+  test("serializes intentional JSON primitive bodies", async () => {
+    const { calls, fetchImpl } = createFetchMock([
+      jsonResponse(200, { data: "null" }),
+      jsonResponse(200, { data: "false" }),
+      jsonResponse(200, { data: "zero" }),
+      jsonResponse(200, { data: "empty" }),
+    ]);
+    const client = createApiClient({ baseUrl, fetch: fetchImpl });
+
+    await client.request({ body: null, path: "/null-body" });
+    await client.request({ body: false, path: "/false-body" });
+    await client.request({ body: 0, path: "/zero-body" });
+    await client.request({ body: "", path: "/empty-body" });
+
+    expect(calls.map((call) => call.init?.body)).toEqual([
+      "null",
+      "false",
+      "0",
+      '""',
+    ]);
   });
 
   test("returns undefined for 204 and empty successful responses", async () => {
@@ -209,6 +248,47 @@ describe("API transport foundation", () => {
     });
   });
 
+  test("classifies representative Backend error envelopes", async () => {
+    const { fetchImpl } = createFetchMock([
+      jsonResponse(400, backendError("VALIDATION_FAILED"), false),
+      jsonResponse(401, backendError("AUTH_REQUIRED"), false),
+      jsonResponse(403, backendError("ACCESS_DENIED"), false),
+      jsonResponse(404, backendError("RESOURCE_NOT_FOUND"), false),
+      jsonResponse(409, backendError("IDEMPOTENCY_KEY_CONFLICT"), false),
+      jsonResponse(402, backendError("ENTITLEMENT_REQUIRED"), false),
+      jsonResponse(500, backendError("INTERNAL_ERROR"), false),
+    ]);
+    const client = createApiClient({ baseUrl, fetch: fetchImpl });
+
+    await expect(client.request({ path: "/validation" })).rejects.toMatchObject(
+      { category: "validation", status: 400 },
+    );
+    await expect(client.request({ path: "/auth" })).rejects.toMatchObject({
+      category: "unauthenticated",
+      status: 401,
+    });
+    await expect(client.request({ path: "/forbidden" })).rejects.toMatchObject({
+      category: "forbidden",
+      status: 403,
+    });
+    await expect(client.request({ path: "/missing" })).rejects.toMatchObject({
+      category: "not-found",
+      status: 404,
+    });
+    await expect(
+      client.request({ path: "/idempotency" }),
+    ).rejects.toMatchObject({ category: "idempotency-conflict", status: 409 });
+    await expect(client.request({ path: "/quota" })).rejects.toMatchObject({
+      category: "entitlement-or-quota",
+      status: 402,
+    });
+    await expect(client.request({ path: "/server" })).rejects.toMatchObject({
+      category: "unknown",
+      code: "INTERNAL_ERROR",
+      status: 500,
+    });
+  });
+
   test("distinguishes network failures from Backend errors", async () => {
     const networkFailure = new TypeError("fetch failed");
     const { fetchImpl } = createFetchMock([networkFailure]);
@@ -277,6 +357,35 @@ describe("API transport foundation", () => {
       client.request({ method: "POST", path: "/auth/refresh" }),
     ).rejects.toMatchObject({ category: "unauthenticated" });
     expect(calls).toHaveLength(1);
+  });
+
+  test("does not recursively refresh when refresh returns non-auth failures", async () => {
+    const failures = [
+      jsonResponse(403, backendError("SUPPORT_ACCESS_DENIED"), false),
+      new Response("{", {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+      new TypeError("refresh network failed"),
+      jsonResponse(500, backendError("INTERNAL_ERROR"), false),
+    ];
+
+    for (const failure of failures) {
+      const { calls, fetchImpl } = createFetchMock([
+        jsonResponse(401, authExpiredEnvelope(), false),
+        failure,
+      ]);
+      const client = createApiClient({
+        baseUrl,
+        fetch: fetchImpl,
+        refresh: {},
+      });
+
+      await expect(client.request({ path: "/me" })).rejects.toBeTruthy();
+      expect(
+        calls.filter((call) => pathname(call) === "/api/v1/auth/refresh"),
+      ).toHaveLength(1);
+    }
   });
 
   test("replays one 401 after a successful cookie refresh", async () => {
@@ -385,6 +494,209 @@ describe("API transport foundation", () => {
     ).toHaveLength(1);
   });
 
+  test("uses the refresh result token for all waiting replays even when the provider remains stale", async () => {
+    const deferredRefresh = createDeferred<Response>();
+    const { calls, fetchImpl } = createFetchMock([
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(401, authExpiredEnvelope(), false),
+      deferredRefresh.promise,
+      jsonResponse(200, { data: "first" }),
+      jsonResponse(200, { data: "second" }),
+    ]);
+    const client = createApiClient({
+      accessTokenProvider: () => "access-old",
+      baseUrl,
+      fetch: fetchImpl,
+      refresh: {
+        onAccessToken: async () => {
+          await Promise.resolve();
+        },
+      },
+    });
+
+    const first = client.request({ path: "/first" });
+    const second = client.request({ path: "/second" });
+    await Promise.resolve();
+    deferredRefresh.resolve(jsonResponse(200, refreshEnvelope("access-new")));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { data: "first" },
+      { data: "second" },
+    ]);
+    expect(headerValue(calls[3], "authorization")).toBe("Bearer access-new");
+    expect(headerValue(calls[4], "authorization")).toBe("Bearer access-new");
+  });
+
+  test("preserves each concurrent replay's own body, query, idempotency key, and support context", async () => {
+    const deferredRefresh = createDeferred<Response>();
+    const { calls, fetchImpl } = createFetchMock([
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(401, authExpiredEnvelope(), false),
+      deferredRefresh.promise,
+      jsonResponse(200, { data: "a" }),
+      jsonResponse(200, { data: "b" }),
+      jsonResponse(200, { data: "c" }),
+    ]);
+    const client = createApiClient({ baseUrl, fetch: fetchImpl, refresh: {} });
+
+    const first = client.request({
+      idempotencyKey: "key-a",
+      method: "POST",
+      path: "/commands/a",
+      query: { cursor: "cursor&a" },
+      supportSessionId: "support-a",
+      body: { command: "a" },
+    });
+    const second = client.request({
+      idempotencyKey: "key-b",
+      method: "PATCH",
+      path: "/commands/b",
+      supportSessionId: "support-b",
+      body: { command: "b" },
+    });
+    const third = client.request({
+      method: "GET",
+      path: "/commands/c",
+      query: { page: 3 },
+    });
+    await Promise.resolve();
+    deferredRefresh.resolve(jsonResponse(200, refreshEnvelope("fresh")));
+
+    await expect(Promise.all([first, second, third])).resolves.toEqual([
+      { data: "a" },
+      { data: "b" },
+      { data: "c" },
+    ]);
+
+    expect(pathWithSearch(calls[4])).toBe(
+      "/api/v1/commands/a?cursor=cursor%26a",
+    );
+    expect(calls[4].init?.body).toBe('{"command":"a"}');
+    expect(headerValue(calls[4], "idempotency-key")).toBe("key-a");
+    expect(headerValue(calls[4], "x-support-session-id")).toBe("support-a");
+    expect(calls[5].init?.method).toBe("PATCH");
+    expect(calls[5].init?.body).toBe('{"command":"b"}');
+    expect(headerValue(calls[5], "idempotency-key")).toBe("key-b");
+    expect(headerValue(calls[5], "x-support-session-id")).toBe("support-b");
+    expect(pathWithSearch(calls[6])).toBe("/api/v1/commands/c?page=3");
+    expect(headerValue(calls[6], "idempotency-key")).toBeNull();
+    expect(headerValue(calls[6], "x-support-session-id")).toBeNull();
+  });
+
+  test("keeps independent clients from sharing refresh flights or tokens", async () => {
+    const { calls: callsA, fetchImpl: fetchA } = createFetchMock([
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(200, refreshEnvelope("token-a")),
+      jsonResponse(200, { data: "a" }),
+    ]);
+    const { calls: callsB, fetchImpl: fetchB } = createFetchMock([
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(200, refreshEnvelope("token-b")),
+      jsonResponse(200, { data: "b" }),
+    ]);
+    const clientA = createApiClient({ baseUrl, fetch: fetchA, refresh: {} });
+    const clientB = createApiClient({ baseUrl, fetch: fetchB, refresh: {} });
+
+    await expect(
+      Promise.all([
+        clientA.request({ path: "/client-a" }),
+        clientB.request({ path: "/client-b" }),
+      ]),
+    ).resolves.toEqual([{ data: "a" }, { data: "b" }]);
+
+    expect(headerValue(callsA[2], "authorization")).toBe("Bearer token-a");
+    expect(headerValue(callsB[2], "authorization")).toBe("Bearer token-b");
+  });
+
+  test("callback failure rejects waiters consistently and clears refresh state for a later refresh", async () => {
+    const { calls, fetchImpl } = createFetchMock([
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(200, refreshEnvelope("failed-callback-token")),
+      jsonResponse(401, authExpiredEnvelope(), false),
+      jsonResponse(200, refreshEnvelope("next-token")),
+      jsonResponse(200, { data: "next" }),
+    ]);
+    const callbackError = new Error("auth callback failed");
+    let shouldThrow = true;
+    const client = createApiClient({
+      baseUrl,
+      fetch: fetchImpl,
+      refresh: {
+        onAccessToken: () => {
+          if (shouldThrow) {
+            shouldThrow = false;
+            throw callbackError;
+          }
+        },
+      },
+    });
+
+    await expect(
+      Promise.all([
+        client.request({ path: "/first" }),
+        client.request({ path: "/second" }),
+      ]),
+    ).rejects.toBe(callbackError);
+
+    await expect(client.request({ path: "/later" })).resolves.toEqual({
+      data: "next",
+    });
+    expect(
+      calls.filter((call) => pathname(call) === "/api/v1/auth/refresh"),
+    ).toHaveLength(2);
+  });
+
+  test("one aborted waiter does not cancel a shared refresh needed by another request", async () => {
+    const deferredRefresh = createDeferred<Response>();
+    const calls: FetchCall[] = [];
+    const fetchFunction = async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      calls.push({ init, input });
+
+      if (calls.length === 1 || calls.length === 2) {
+        return jsonResponse(401, authExpiredEnvelope(), false);
+      }
+
+      if (calls.length === 3) {
+        return deferredRefresh.promise;
+      }
+
+      if (init?.signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+
+      return jsonResponse(200, {
+        data: pathname({ input, init }),
+      });
+    };
+    const fetchImpl = Object.assign(fetchFunction, {
+      preconnect: vi.fn(),
+    }) satisfies typeof fetch;
+    const client = createApiClient({ baseUrl, fetch: fetchImpl, refresh: {} });
+    const abortingController = new AbortController();
+
+    const aborted = client.request({
+      path: "/aborted",
+      signal: abortingController.signal,
+    });
+    const survives = client.request({ path: "/survives" });
+    await Promise.resolve();
+    abortingController.abort();
+    deferredRefresh.resolve(jsonResponse(200, refreshEnvelope("fresh")));
+
+    await expect(aborted).rejects.toMatchObject({ kind: "abort" });
+    await expect(survives).resolves.toEqual({
+      data: "/api/v1/survives",
+    });
+    expect(
+      calls.filter((call) => pathname(call) === "/api/v1/auth/refresh"),
+    ).toHaveLength(1);
+  });
+
   test("propagates refresh failure as a typed session failure", async () => {
     const { fetchImpl } = createFetchMock([
       jsonResponse(401, authExpiredEnvelope(), false),
@@ -442,6 +754,30 @@ describe("API transport foundation", () => {
         path: "/me",
       }),
     ).rejects.toThrow("Use the explicit API client option for authorization");
+  });
+
+  test("rejects protected header smuggling regardless of case or Headers input", async () => {
+    const { fetchImpl } = createFetchMock([
+      jsonResponse(200, { data: true }),
+      jsonResponse(200, { data: true }),
+    ]);
+    const client = createApiClient({ baseUrl, fetch: fetchImpl });
+
+    await expect(
+      client.request({
+        headers: { AUTHORIZATION: "Bearer bypass" },
+        path: "/auth-header",
+      }),
+    ).rejects.toThrow("authorization");
+    await expect(
+      client.request({
+        headers: new Headers({
+          "IdEmPoTeNcY-kEy": "bypass",
+          "X-SuPpOrT-SeSsIoN-Id": "bypass",
+        }),
+        path: "/typed-headers",
+      }),
+    ).rejects.toThrow(/idempotency-key|x-support-session-id/);
   });
 
   test("keeps ApiError detectable for later feature boundaries", () => {
@@ -510,6 +846,15 @@ function authExpiredEnvelope() {
   };
 }
 
+function backendError(code: string) {
+  return {
+    error: {
+      code,
+      message: `${code} message`,
+    },
+  };
+}
+
 function refreshEnvelope(accessToken: string) {
   return {
     data: {
@@ -532,6 +877,12 @@ function headerValue(call: FetchCall, header: string): string | null {
 
 function pathname(call: FetchCall): string {
   return new URL(String(call.input)).pathname;
+}
+
+function pathWithSearch(call: FetchCall): string {
+  const url = new URL(String(call.input));
+
+  return `${url.pathname}${url.search}`;
 }
 
 function createDeferred<T>(): {

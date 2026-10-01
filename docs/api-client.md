@@ -38,6 +38,8 @@ body: { "clientType": "WEB" }
 
 The client coordinates concurrent 401 responses through one refresh flight per client instance. After refresh succeeds, each eligible original request is replayed at most once with the refreshed access token and the original idempotency key. The refresh endpoint itself is never refresh-retried.
 
+If the optional `onAccessToken` callback throws or rejects, all requests waiting on that refresh fail with the callback error and the refresh flight is cleared so a later request can attempt a fresh refresh. WEB-009 owns making that callback reliable when it wires auth state.
+
 ## Retry Policy
 
 There is no generic automatic retry for network errors, timeouts, 5xx responses, version conflicts, or idempotency conflicts. A single 401 replay after a successful refresh is the only automatic replay. This preserves Backend command semantics where a request may have reached the server even if the browser did not receive a response.
@@ -58,7 +60,7 @@ The client never fabricates or infers a support session id. Later support-consol
 
 ## Serialization
 
-Query serialization is deterministic and preserves strings as supplied, including date-only values, offset timestamps, and opaque cursors. `undefined` is omitted. `null` is serialized as an empty value only when the caller explicitly supplies it.
+Query serialization is deterministic and preserves strings as supplied, including date-only values, offset timestamps, and opaque cursors. `undefined` is omitted. Generic `null` query values are rejected because WEB-006 did not verify a universal Backend meaning for `null` versus an empty string; endpoint-specific serializers can be added later when a route contract proves the semantics.
 
 JSON request bodies are stringified once. `204` and empty successful responses resolve to `undefined`. Non-JSON and malformed JSON responses become typed transport errors.
 
@@ -71,6 +73,12 @@ Callers should use Backend `error.code` first and HTTP status second. Message te
 ## Cancellation And Timeout
 
 Requests accept `AbortSignal`. WEB-007 does not impose a default timeout because the correct timeout budget is product-flow and deployment dependent. Future infrastructure can pass an abort signal or timeout controller without changing the transport contract.
+
+Aborting one original request while it waits on a shared refresh does not cancel the shared refresh. The aborted request remains cancelled when its replay attempt observes the aborted signal, while unrelated waiters may still replay.
+
+## Credentials
+
+Ordinary requests omit credentials unless a client default or request option supplies `same-origin` or `include`. Refresh defaults to `include` because the verified Web refresh token is an HttpOnly first-party cookie. Request paths cannot be absolute URLs, so caller-supplied paths cannot redirect credentialed refresh transport to another origin.
 
 ## File Upload Boundary
 
