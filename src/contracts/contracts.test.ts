@@ -32,7 +32,7 @@ describe("backend contract DTO foundation", () => {
   });
 
   test("captures verified auth and support literals", () => {
-    expect(authClientTypes).toEqual(["WEB", "IOS", "ANDROID"]);
+    expect(authClientTypes).toEqual(["WEB", "MOBILE", "API"]);
     expect(isAuthClientType("WEB")).toBe(true);
     expect(isAuthClientType("BROWSER")).toBe(false);
     expect(supportContextTypes).toEqual(["USER_CONTEXT", "WORKSPACE_SUPPORT"]);

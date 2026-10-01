@@ -26,6 +26,25 @@ export const messages = {
       resolvedPrefix: "المطبق",
       themeLabel: "السمة",
     },
+    auth: {
+      loading: "جارٍ التحقق من الجلسة...",
+      login: {
+        credentialLabel: "البريد الإلكتروني أو الهاتف",
+        errorFallback: "تعذر إكمال تسجيل الدخول. حاول مرة أخرى.",
+        loading: "جارٍ المتابعة...",
+        mfaCredentialLabel: "رمز التحقق",
+        mfaHelp: "أكمل التحقق متعدد العوامل للمتابعة.",
+        mfaMethodLabel: "طريقة التحقق",
+        mfaSubmit: "تحقق",
+        passwordLabel: "كلمة المرور",
+        submit: "تسجيل الدخول",
+        title: "تسجيل الدخول",
+      },
+      protected: {
+        copy: "هذه مساحة تحقق بسيطة لمسار الجلسة المحمية.",
+        title: "جلسة مصادق عليها",
+      },
+    },
   },
   en: {
     metadata: {
@@ -52,6 +71,25 @@ export const messages = {
       appearanceLabel: "Appearance",
       resolvedPrefix: "Resolved",
       themeLabel: "Theme",
+    },
+    auth: {
+      loading: "Checking session...",
+      login: {
+        credentialLabel: "Email or phone",
+        errorFallback: "Sign-in could not be completed. Try again.",
+        loading: "Continuing...",
+        mfaCredentialLabel: "Verification code",
+        mfaHelp: "Complete multi-factor verification to continue.",
+        mfaMethodLabel: "Verification method",
+        mfaSubmit: "Verify",
+        passwordLabel: "Password",
+        submit: "Sign in",
+        title: "Sign in",
+      },
+      protected: {
+        copy: "This is a small protected-route proof for the session layer.",
+        title: "Authenticated session",
+      },
     },
   },
 } as const satisfies Record<Locale, Record<string, unknown>>;
