@@ -64,6 +64,46 @@ describe("auth session lifecycle", () => {
     expect(calls[0].init?.body).toBe('{"clientType":"WEB"}');
   });
 
+  test("coordinates ten bootstrap consumers through one refresh and clears failed flight", async () => {
+    const firstRefresh = deferred<Response>();
+    const { calls, fetchImpl } = createFetchMock([
+      () => firstRefresh.promise,
+      jsonResponse(200, { data: { success: true } }),
+      backendError(401, "REFRESH_TOKEN_INVALID"),
+      jsonResponse(200, { data: tokenResponse("retry-token", userA) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+
+    const bootstraps = Array.from({ length: 10 }, () => auth.bootstrap());
+    await waitForCalls(calls, 1);
+    firstRefresh.resolve(
+      jsonResponse(200, { data: tokenResponse("bootstrap-token", userA) }),
+    );
+
+    const states = await Promise.all(bootstraps);
+
+    expect(states.every((state) => state.status === "authenticated")).toBe(
+      true,
+    );
+    expect(calls).toHaveLength(1);
+
+    await auth.logout();
+    await auth.bootstrap();
+    await auth.bootstrap();
+
+    expect(
+      calls.filter((call) => String(call.input).endsWith("/auth/refresh")),
+    ).toHaveLength(3);
+    expect(auth.state).toMatchObject({
+      accessToken: "retry-token",
+      status: "authenticated",
+    });
+  });
+
   test("failed bootstrap clears protected cache and becomes unauthenticated", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(["session", "old"], { private: true });
@@ -283,6 +323,111 @@ describe("auth session lifecycle", () => {
     });
   });
 
+  test("stale bootstrap failure cannot clear a newer login", async () => {
+    const refresh = deferred<Response>();
+    const { fetchImpl } = createFetchMock([
+      () => refresh.promise,
+      jsonResponse(200, { data: tokenResponse("login-token", userB) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+
+    const bootstrap = auth.bootstrap();
+    await auth.login({ identifier: "b@example.test", password: "password" });
+    refresh.resolve(backendError(401, "REFRESH_TOKEN_INVALID"));
+    await bootstrap;
+
+    expect(auth.state).toMatchObject({
+      accessToken: "login-token",
+      status: "authenticated",
+      user: userB,
+    });
+  });
+
+  test("newer login wins when an older login succeeds or fails later", async () => {
+    const loginA = deferred<Response>();
+    const { fetchImpl } = createFetchMock([
+      () => loginA.promise,
+      jsonResponse(200, { data: tokenResponse("token-b", userB) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+
+    const oldLogin = auth
+      .login({ identifier: "a@example.test", password: "password" })
+      .catch((error: unknown) => error);
+    await auth.login({ identifier: "b@example.test", password: "password" });
+    loginA.resolve(
+      jsonResponse(200, { data: tokenResponse("token-a", userA) }),
+    );
+    await oldLogin;
+
+    expect(auth.state).toMatchObject({
+      accessToken: "token-b",
+      status: "authenticated",
+      user: userB,
+    });
+
+    const failingLogin = deferred<Response>();
+    const second = createFetchMock([
+      () => failingLogin.promise,
+      jsonResponse(200, { data: tokenResponse("token-b2", userB) }),
+    ]);
+    const auth2 = new AuthSessionController({
+      baseUrl,
+      fetch: second.fetchImpl,
+      queryClient: new QueryClient(),
+    });
+    const oldFailingLogin = auth2
+      .login({ identifier: "a@example.test", password: "bad" })
+      .catch((error: unknown) => error);
+    await auth2.login({ identifier: "b@example.test", password: "password" });
+    failingLogin.resolve(backendError(401, "AUTH_CREDENTIALS_INVALID"));
+    await oldFailingLogin;
+
+    expect(auth2.state).toMatchObject({
+      accessToken: "token-b2",
+      status: "authenticated",
+      user: userB,
+    });
+  });
+
+  test("stale MFA verification cannot establish an obsolete session", async () => {
+    const mfaA = deferred<Response>();
+    const { fetchImpl } = createFetchMock([
+      () => mfaA.promise,
+      jsonResponse(200, { data: tokenResponse("token-b", userB) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+
+    const oldMfa = auth
+      .verifyMfaLogin({
+        credential: "123456",
+        factorType: "TOTP",
+        mfaChallengeToken: "old-challenge",
+      })
+      .catch((error: unknown) => error);
+    await auth.login({ identifier: "b@example.test", password: "password" });
+    mfaA.resolve(jsonResponse(200, { data: tokenResponse("mfa-a", userA) }));
+    await oldMfa;
+
+    expect(auth.state).toMatchObject({
+      accessToken: "token-b",
+      status: "authenticated",
+      user: userB,
+    });
+  });
+
   test("stale refresh callback cannot resurrect or overwrite a newer session", async () => {
     const refresh = deferred<Response>();
     const { calls, fetchImpl } = createFetchMock([
@@ -315,6 +460,108 @@ describe("auth session lifecycle", () => {
     });
   });
 
+  test("stale refresh callback cannot restore a completed logout", async () => {
+    const refresh = deferred<Response>();
+    const { calls, fetchImpl } = createFetchMock([
+      jsonResponse(200, { data: tokenResponse("token-a", userA) }),
+      backendError(401, "AUTH_TOKEN_EXPIRED"),
+      () => refresh.promise,
+      jsonResponse(200, { data: { success: true } }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+    await auth.login({ identifier: "a@example.test", password: "password" });
+    const oldRequest = auth.apiClient
+      .request({ path: "/me" })
+      .catch(() => null);
+    await waitForCalls(calls, 3);
+    await auth.logout();
+
+    refresh.resolve(
+      jsonResponse(200, { data: tokenResponse("token-a2", userA) }),
+    );
+    await oldRequest;
+
+    expect(auth.state.status).toBe("unauthenticated");
+    expect(auth.getAccessToken()).toBeNull();
+  });
+
+  test("old terminal refresh failure cannot clear a newer session", async () => {
+    const oldFailure = deferred<unknown>();
+    const { fetchImpl } = createFetchMock([
+      jsonResponse(200, { data: tokenResponse("token-a", userA) }),
+      jsonResponse(200, { data: tokenResponse("token-b", userB) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient: new QueryClient(),
+    });
+    await auth.login({ identifier: "a@example.test", password: "password" });
+    const oldQuery = auth
+      .createAuthenticatedQueryGuard(async () => {
+        await oldFailure.promise;
+        return { ok: true };
+      })({ signal: new AbortController().signal })
+      .catch((error: unknown) => error);
+    await auth.login({ identifier: "b@example.test", password: "password" });
+    oldFailure.reject(
+      new ApiError({
+        category: "unauthenticated",
+        code: "AUTH_REQUIRED",
+        kind: "backend",
+        message: "Old session expired",
+        status: 401,
+      }),
+    );
+    await oldQuery;
+
+    expect(auth.state).toMatchObject({
+      accessToken: "token-b",
+      status: "authenticated",
+      user: userB,
+    });
+  });
+
+  test("logout wins over late bootstrap success or failure", async () => {
+    const successRefresh = deferred<Response>();
+    const success = createFetchMock([
+      () => successRefresh.promise,
+      jsonResponse(200, { data: { success: true } }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: success.fetchImpl,
+      queryClient: new QueryClient(),
+    });
+    const bootstrap = auth.bootstrap();
+    await auth.logout();
+    successRefresh.resolve(
+      jsonResponse(200, { data: tokenResponse("late-token", userA) }),
+    );
+    await bootstrap;
+    expect(auth.state.status).toBe("unauthenticated");
+
+    const failureRefresh = deferred<Response>();
+    const failure = createFetchMock([
+      () => failureRefresh.promise,
+      jsonResponse(200, { data: { success: true } }),
+    ]);
+    const auth2 = new AuthSessionController({
+      baseUrl,
+      fetch: failure.fetchImpl,
+      queryClient: new QueryClient(),
+    });
+    const failedBootstrap = auth2.bootstrap();
+    await auth2.logout();
+    failureRefresh.resolve(backendError(401, "REFRESH_TOKEN_INVALID"));
+    await failedBootstrap;
+    expect(auth2.state.status).toBe("unauthenticated");
+  });
+
   test("old in-flight protected query cannot repopulate cache after logout", async () => {
     const response = deferred<{ private: true }>();
     const queryClient = new QueryClient();
@@ -344,11 +591,59 @@ describe("auth session lifecycle", () => {
     expect(queryClient.getQueryData(["session", "protected"])).toBeUndefined();
   });
 
+  test("old account query cannot repopulate protected cache after account replacement", async () => {
+    const response = deferred<{ private: true; user: string }>();
+    const queryClient = new QueryClient();
+    const { fetchImpl } = createFetchMock([
+      jsonResponse(200, { data: tokenResponse("token-a", userA) }),
+      jsonResponse(200, { data: tokenResponse("token-b", userB) }),
+    ]);
+    const auth = new AuthSessionController({
+      baseUrl,
+      fetch: fetchImpl,
+      queryClient,
+    });
+    await auth.login({ identifier: "a@example.test", password: "password" });
+
+    const query = queryClient
+      .fetchQuery({
+        queryFn: auth.createAuthenticatedQueryGuard(
+          async () => response.promise,
+        ),
+        queryKey: ["session", "protected"],
+      })
+      .catch(() => null);
+    await auth.login({ identifier: "b@example.test", password: "password" });
+    response.resolve({ private: true, user: "a" });
+    await query;
+
+    expect(queryClient.getQueryData(["session", "protected"])).toBeUndefined();
+    expect(auth.state).toMatchObject({
+      accessToken: "token-b",
+      status: "authenticated",
+      user: userB,
+    });
+  });
+
   test("rejects external return URLs", () => {
     expect(getSafeReturnPath("/app?tab=one")).toBe("/app?tab=one");
+    expect(getSafeReturnPath("/app#section")).toBe("/app#section");
+    expect(getSafeReturnPath("/app/settings/profile")).toBe(
+      "/app/settings/profile",
+    );
     expect(getSafeReturnPath("https://evil.example/app")).toBe("/app");
+    expect(getSafeReturnPath("http://evil.example/app")).toBe("/app");
     expect(getSafeReturnPath("//evil.example/app")).toBe("/app");
+    expect(getSafeReturnPath("\\\\evil.example")).toBe("/app");
+    expect(getSafeReturnPath("/\\evil.example")).toBe("/app");
     expect(getSafeReturnPath("%2F%2Fevil.example%2Fapp")).toBe("/app");
+    expect(getSafeReturnPath("%5C%5Cevil.example")).toBe("/app");
+    expect(getSafeReturnPath("javascript:alert(1)")).toBe("/app");
+    expect(getSafeReturnPath("data:text/html,hello")).toBe("/app");
+    expect(getSafeReturnPath("/app%0d%0aLocation:%20//evil.example")).toBe(
+      "/app",
+    );
+    expect(getSafeReturnPath(" /app")).toBe("/app");
   });
 });
 

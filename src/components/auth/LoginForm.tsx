@@ -105,6 +105,14 @@ export function LoginForm({ labels }: { labels: LoginLabels }) {
   const isSubmitting =
     loginForm.formState.isSubmitting || mfaForm.formState.isSubmitting;
 
+  if (state.status !== "unauthenticated") {
+    return (
+      <main className={styles.page} aria-busy="true" aria-live="polite">
+        <p>{labels.loading}</p>
+      </main>
+    );
+  }
+
   return (
     <main className={styles.page}>
       <section className={styles.panel} aria-labelledby="auth-title">

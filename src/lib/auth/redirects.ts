@@ -4,7 +4,11 @@ export function getSafeReturnPath(
   value: string | null | undefined,
   fallback = defaultAuthenticatedPath,
 ): string {
-  if (typeof value !== "string" || value.trim() === "") {
+  if (
+    typeof value !== "string" ||
+    value.trim() === "" ||
+    value !== value.trim()
+  ) {
     return fallback;
   }
 
@@ -19,7 +23,9 @@ export function getSafeReturnPath(
   if (
     !decoded.startsWith("/") ||
     decoded.startsWith("//") ||
-    decoded.includes("\\")
+    decoded.includes("\\") ||
+    /[\u0000-\u001F\u007F]/.test(decoded) ||
+    decoded !== decoded.trim()
   ) {
     return fallback;
   }

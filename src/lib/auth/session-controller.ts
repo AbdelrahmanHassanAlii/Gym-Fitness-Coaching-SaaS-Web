@@ -127,6 +127,7 @@ export class AuthSessionController {
 
   async login(command: LoginCommand): Promise<LoginCommandResult> {
     this.startSessionReplacement();
+    const startedGeneration = this.sessionGeneration;
     this.ensureBackendConfigured();
 
     try {
@@ -140,16 +141,23 @@ export class AuthSessionController {
       });
 
       if (isMfaRequiredLogin(envelope.data)) {
+        this.assertCurrentAuthOperation(startedGeneration);
         this.setState(unauthenticatedState);
         return { challenge: envelope.data, status: "mfa-required" };
       }
 
+      this.assertCurrentAuthOperation(startedGeneration);
       const session = this.establishSession(envelope.data, {
         clearCache: true,
       });
       return { session, status: "authenticated" };
     } catch (error) {
-      this.terminateLocalSession(toApiError(error));
+      if (
+        !isStaleAuthOperationError(error) &&
+        this.sessionGeneration === startedGeneration
+      ) {
+        this.terminateLocalSession(toApiError(error));
+      }
       throw error;
     }
   }
@@ -158,6 +166,7 @@ export class AuthSessionController {
     command: MfaLoginCommand,
   ): Promise<AuthenticatedAuthState> {
     this.startSessionReplacement();
+    const startedGeneration = this.sessionGeneration;
     this.ensureBackendConfigured();
 
     try {
@@ -170,9 +179,15 @@ export class AuthSessionController {
         refreshOnUnauthorized: false,
       });
 
+      this.assertCurrentAuthOperation(startedGeneration);
       return this.establishSession(envelope.data, { clearCache: true });
     } catch (error) {
-      this.terminateLocalSession(toApiError(error));
+      if (
+        !isStaleAuthOperationError(error) &&
+        this.sessionGeneration === startedGeneration
+      ) {
+        this.terminateLocalSession(toApiError(error));
+      }
       throw error;
     }
   }
@@ -219,7 +234,8 @@ export class AuthSessionController {
         if (
           isApiError(error) &&
           error.kind === "backend" &&
-          error.category === "unauthenticated"
+          error.category === "unauthenticated" &&
+          this.sessionGeneration === startedGeneration
         ) {
           this.terminateLocalSession(error);
         }
@@ -352,12 +368,33 @@ export class AuthSessionController {
       message: "Backend API base URL is not configured",
     });
   }
+
+  private assertCurrentAuthOperation(startedGeneration: number): void {
+    if (this.sessionGeneration === startedGeneration) {
+      return;
+    }
+
+    throw createStaleAuthOperationError();
+  }
+}
+
+function createStaleAuthOperationError(): ApiError {
+  return new ApiError({
+    category: "unauthenticated",
+    code: "STALE_AUTH_OPERATION",
+    kind: "abort",
+    message: "Ignored stale authentication operation after session changed",
+  });
 }
 
 function isMfaRequiredLogin(
   value: LoginResponseDto,
 ): value is Extract<LoginResponseDto, { status: "MFA_REQUIRED" }> {
   return "status" in value && value.status === "MFA_REQUIRED";
+}
+
+function isStaleAuthOperationError(error: unknown): boolean {
+  return isApiError(error) && error.code === "STALE_AUTH_OPERATION";
 }
 
 function toApiError(error: unknown): ApiError {
