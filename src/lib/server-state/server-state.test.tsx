@@ -24,8 +24,8 @@ describe("server-state infrastructure", () => {
     expect(mutationOptions?.retry).toBe(false);
   });
 
-  test("does not retry non-retryable backend errors", () => {
-    for (const status of [400, 401, 403, 404, 409]) {
+  test("does not retry non-retryable backend errors or cancellations", () => {
+    for (const status of [400, 401, 403, 404, 409, 422, 429]) {
       expect(
         shouldRetryQuery(
           0,
@@ -38,6 +38,18 @@ describe("server-state infrastructure", () => {
         ),
       ).toBe(false);
     }
+    expect(
+      shouldRetryQuery(
+        0,
+        new ApiError({ kind: "abort", message: "cancelled" }),
+      ),
+    ).toBe(false);
+    expect(
+      shouldRetryQuery(
+        0,
+        new ApiError({ kind: "malformed-response", message: "bad json" }),
+      ),
+    ).toBe(false);
   });
 
   test("retries only bounded network and server failures for queries", () => {
@@ -54,6 +66,16 @@ describe("server-state infrastructure", () => {
           kind: "backend",
           message: "server",
           status: 500,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldRetryQuery(
+        1,
+        new ApiError({
+          kind: "non-json-response",
+          message: "proxy",
+          status: 502,
         }),
       ),
     ).toBe(true);
@@ -122,13 +144,16 @@ describe("server-state infrastructure", () => {
       "workspace_1",
     ]);
     expect(
-      appQueryKeys.list("workspace_1", "documents", {
+      appQueryKeys.workspaceList("workspace_1", "documents", {
         category: "INBODY",
         cursor: "opaque&cursor",
       }),
     ).toEqual([
       "hassan-web",
+      "workspace",
       "workspace_1",
+      "access-context",
+      "user",
       "documents",
       "list",
       { category: "INBODY", cursor: "opaque&cursor" },
@@ -139,29 +164,115 @@ describe("server-state infrastructure", () => {
     expect(() =>
       createQueryKey("workspace", { supportSessionId: "support-secret" }),
     ).toThrow("sensitive field");
+    expect(() =>
+      createQueryKey("workspace", { refresh_token: "secret-token" }),
+    ).toThrow("sensitive field");
+    expect(() =>
+      createQueryKey("workspace", { Authorization: "Bearer token" }),
+    ).toThrow("sensitive field");
+    expect(() =>
+      createQueryKey("workspace", { nested: { signedUrl: "https://signed" } }),
+    ).toThrow("sensitive field");
+  });
+
+  test("normalizes query-key filter objects deterministically", () => {
+    const first = createQueryKey("workspace", "workspace_1", {
+      b: "two",
+      a: "one",
+      cursor: "opaque+cursor",
+      missing: undefined,
+      nested: { z: "last", a: "first" },
+    });
+    const second = createQueryKey("workspace", "workspace_1", {
+      nested: { a: "first", z: "last" },
+      cursor: "opaque+cursor",
+      a: "one",
+      b: "two",
+    });
+
+    expect(first).toEqual(second);
+    expect(() =>
+      createQueryKey("workspace", new Date("2026-10-01") as never),
+    ).toThrow("plain serializable objects");
   });
 
   test("provides cache clearing seams for future logout and workspace switches", () => {
     const queryClient = createAppQueryClient();
-    queryClient.setQueryData(appQueryKeys.workspace("workspace_1"), {
-      name: "One",
-    });
-    queryClient.setQueryData(appQueryKeys.workspace("workspace_2"), {
-      name: "Two",
+    queryClient.setQueryData(
+      appQueryKeys.workspaceList("workspace_1", "files"),
+      {
+        name: "One",
+      },
+    );
+    queryClient.setQueryData(
+      appQueryKeys.workspaceDetail("workspace_1", "files", "file_1"),
+      {
+        name: "One detail",
+      },
+    );
+    queryClient.setQueryData(
+      appQueryKeys.workspaceList("workspace_2", "files"),
+      {
+        name: "Two",
+      },
+    );
+    queryClient.setQueryData(createQueryKey("public", "marketing"), {
+      name: "Public",
     });
 
     removeWorkspaceQueryCache(queryClient, "workspace_1");
 
     expect(
-      queryClient.getQueryData(appQueryKeys.workspace("workspace_1")),
+      queryClient.getQueryData(
+        appQueryKeys.workspaceList("workspace_1", "files"),
+      ),
     ).toBe(undefined);
     expect(
-      queryClient.getQueryData(appQueryKeys.workspace("workspace_2")),
+      queryClient.getQueryData(
+        appQueryKeys.workspaceDetail("workspace_1", "files", "file_1"),
+      ),
+    ).toBe(undefined);
+    expect(
+      queryClient.getQueryData(
+        appQueryKeys.workspaceList("workspace_2", "files"),
+      ),
     ).toEqual({ name: "Two" });
+    expect(
+      queryClient.getQueryData(createQueryKey("public", "marketing")),
+    ).toEqual({
+      name: "Public",
+    });
 
     clearSessionQueryCache(queryClient);
 
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  test("separates ordinary and support-context cache entries without support-session secrets", () => {
+    expect(
+      appQueryKeys.workspaceList("workspace_1", "audit", undefined, "user"),
+    ).toEqual([
+      "hassan-web",
+      "workspace",
+      "workspace_1",
+      "access-context",
+      "user",
+      "audit",
+      "list",
+      null,
+    ]);
+    expect(
+      appQueryKeys.workspaceList("workspace_1", "audit", undefined, "support"),
+    ).toEqual([
+      "hassan-web",
+      "workspace",
+      "workspace_1",
+      "access-context",
+      "support",
+      "audit",
+      "list",
+      null,
+    ]);
   });
 
   test("keeps pagination helpers shape-neutral and cursors opaque", () => {

@@ -7,11 +7,14 @@ export type QueryKeyPart =
   | { readonly [key: string]: QueryKeyPart | undefined };
 
 export type AppQueryKey = readonly ["hassan-web", ...QueryKeyPart[]];
+export type AuthorizationCacheContext = "support" | "user";
 
 const secretKeyNamePattern =
   /(access|refresh|auth)?token|authorization|password|secret|cookie|supportsessionid|support-session|signedurl/i;
 
 export const appQueryKeys = {
+  accessContext: (context: AuthorizationCacheContext) =>
+    ["access-context", context] as const,
   all: ["hassan-web"] as const,
   detail: (scope: QueryKeyPart, resource: string, id: QueryKeyPart) =>
     createQueryKey(scope, resource, "detail", id),
@@ -25,14 +28,68 @@ export const appQueryKeys = {
   resource: (scope: QueryKeyPart, resource: string) =>
     createQueryKey(scope, resource),
   workspace: (workspaceId: string) => createQueryKey("workspace", workspaceId),
+  workspaceDetail: (
+    workspaceId: string,
+    resource: string,
+    id: QueryKeyPart,
+    context: AuthorizationCacheContext = "user",
+  ) =>
+    createQueryKey(
+      "workspace",
+      workspaceId,
+      ...appQueryKeys.accessContext(context),
+      resource,
+      "detail",
+      id,
+    ),
+  workspaceList: (
+    workspaceId: string,
+    resource: string,
+    filters?: { readonly [key: string]: QueryKeyPart | undefined },
+    context: AuthorizationCacheContext = "user",
+  ) =>
+    createQueryKey(
+      "workspace",
+      workspaceId,
+      ...appQueryKeys.accessContext(context),
+      resource,
+      "list",
+      filters ?? null,
+    ),
 };
 
 export function createQueryKey(...parts: QueryKeyPart[]): AppQueryKey {
-  for (const part of parts) {
-    assertNoSecretQueryKeyPart(part);
+  return ["hassan-web", ...parts.map(normalizeQueryKeyPart)] as const;
+}
+
+function normalizeQueryKeyPart(part: QueryKeyPart): QueryKeyPart {
+  assertNoSecretQueryKeyPart(part);
+
+  if (part === null || typeof part !== "object") {
+    return part;
   }
 
-  return ["hassan-web", ...parts] as const;
+  if (Array.isArray(part)) {
+    return part.map(normalizeQueryKeyPart);
+  }
+
+  const prototype = Object.getPrototypeOf(part);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error("Query keys only accept plain serializable objects");
+  }
+
+  const objectPart = part as {
+    readonly [key: string]: QueryKeyPart | undefined;
+  };
+  const normalized: Record<string, QueryKeyPart> = {};
+  for (const key of Object.keys(objectPart).sort()) {
+    const value = objectPart[key];
+    if (value !== undefined) {
+      normalized[key] = normalizeQueryKeyPart(value);
+    }
+  }
+
+  return normalized;
 }
 
 function assertNoSecretQueryKeyPart(part: QueryKeyPart | undefined): void {

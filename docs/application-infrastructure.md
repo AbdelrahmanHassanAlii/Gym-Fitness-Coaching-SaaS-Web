@@ -46,7 +46,9 @@ All keys start with:
 ["hassan-web", ...]
 ```
 
-Factories support workspace/resource/list/detail/relationship shapes without pre-creating product modules. Query keys must not contain access tokens, refresh tokens, support-session ids, authorization headers, cookies, signed URLs, passwords, or other secrets. Support context may affect authorization, but the secret support-session id does not belong in cache keys.
+Factories support workspace/resource/list/detail/relationship shapes without pre-creating product modules. Query keys must not contain access tokens, refresh tokens, support-session ids, authorization headers, cookies, signed URLs, passwords, or other secrets. Query keys are not a security boundary; they are a cache identity convention and must be built only from deterministic, serializable, non-secret ids and filters.
+
+Workspace-protected data must use the `workspace*` key factories so all protected entries share the structural `["hassan-web", "workspace", workspaceId, ...]` prefix. Support context may affect authorization, but the secret support-session id does not belong in cache keys. Future support-console work should use the non-secret `access-context` discriminator (`user` or `support`) so ordinary and support-session results do not share cache entries.
 
 ## Cache Session And Tenant Boundary
 
@@ -62,7 +64,7 @@ WEB-006 verified multiple pagination shapes. WEB-008 does not create one univers
 
 React Hook Form is the shared form state primitive. Infrastructure exports the provider/hooks and localized reusable validation message keys for Arabic and English.
 
-`getBackendValidationSummary` preserves Backend validation code, message, and raw details. It intentionally does not map arbitrary details into field errors because WEB-006 did not verify a universal field-path shape.
+`getBackendValidationSummary` preserves Backend validation code, message, and raw details for feature code that needs to inspect them. Treat `rawDetails` as untrusted API data: do not log it broadly or render it directly. The helper intentionally does not map arbitrary details into field errors because WEB-006 did not verify a universal field-path shape.
 
 ## Date And Time
 

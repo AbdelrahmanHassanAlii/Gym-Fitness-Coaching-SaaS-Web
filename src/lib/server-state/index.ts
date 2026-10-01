@@ -9,5 +9,9 @@ export { createAppQueryClient, shouldRetryQuery } from "./query-client";
 export { AppQueryProvider } from "./query-provider";
 export { appendPage, createNextPageParam, flattenPages } from "./pagination";
 export type { ApiQueryRequestFactory } from "./api-query";
-export type { AppQueryKey, QueryKeyPart } from "./query-keys";
+export type {
+  AppQueryKey,
+  AuthorizationCacheContext,
+  QueryKeyPart,
+} from "./query-keys";
 export type { NextPageParamResolver } from "./pagination";
