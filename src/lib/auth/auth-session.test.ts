@@ -430,11 +430,16 @@ describe("auth session lifecycle", () => {
 
   test("stale refresh callback cannot resurrect or overwrite a newer session", async () => {
     const refresh = deferred<Response>();
+    const refreshStarted = deferred<void>();
     const { calls, fetchImpl } = createFetchMock([
       jsonResponse(200, { data: tokenResponse("token-a", userA) }),
       backendError(401, "AUTH_TOKEN_EXPIRED"),
-      () => refresh.promise,
+      () => {
+        refreshStarted.resolve();
+        return refresh.promise;
+      },
       jsonResponse(200, { data: tokenResponse("token-b", userB) }),
+      backendError(401, "STALE_ACCESS_TOKEN"),
     ]);
     const auth = new AuthSessionController({
       baseUrl,
@@ -445,7 +450,13 @@ describe("auth session lifecycle", () => {
     const oldRequest = auth.apiClient
       .request({ path: "/me" })
       .catch(() => null);
-    await waitForCalls(calls, 3);
+    await refreshStarted.promise;
+    expect(requestSummary(calls)).toEqual([
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+      "POST /api/v1/auth/refresh",
+    ]);
+
     await auth.login({ identifier: "b@example.test", password: "password" });
 
     refresh.resolve(
@@ -453,6 +464,14 @@ describe("auth session lifecycle", () => {
     );
     await oldRequest;
 
+    expect(requestSummary(calls)).toEqual([
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+      "POST /api/v1/auth/refresh",
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+    ]);
+    expect(requestHeader(calls[4], "authorization")).toBe("Bearer stale-token");
     expect(auth.state).toMatchObject({
       accessToken: "token-b",
       status: "authenticated",
@@ -462,11 +481,16 @@ describe("auth session lifecycle", () => {
 
   test("stale refresh callback cannot restore a completed logout", async () => {
     const refresh = deferred<Response>();
+    const refreshStarted = deferred<void>();
     const { calls, fetchImpl } = createFetchMock([
       jsonResponse(200, { data: tokenResponse("token-a", userA) }),
       backendError(401, "AUTH_TOKEN_EXPIRED"),
-      () => refresh.promise,
+      () => {
+        refreshStarted.resolve();
+        return refresh.promise;
+      },
       jsonResponse(200, { data: { success: true } }),
+      backendError(401, "STALE_ACCESS_TOKEN"),
     ]);
     const auth = new AuthSessionController({
       baseUrl,
@@ -477,14 +501,34 @@ describe("auth session lifecycle", () => {
     const oldRequest = auth.apiClient
       .request({ path: "/me" })
       .catch(() => null);
-    await waitForCalls(calls, 3);
+    await refreshStarted.promise;
+    expect(requestSummary(calls)).toEqual([
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+      "POST /api/v1/auth/refresh",
+    ]);
+
     await auth.logout();
+    expect(requestSummary(calls)).toEqual([
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+      "POST /api/v1/auth/refresh",
+      "POST /api/v1/auth/logout",
+    ]);
 
     refresh.resolve(
       jsonResponse(200, { data: tokenResponse("token-a2", userA) }),
     );
     await oldRequest;
 
+    expect(requestSummary(calls)).toEqual([
+      "POST /api/v1/auth/login",
+      "GET /api/v1/me",
+      "POST /api/v1/auth/refresh",
+      "POST /api/v1/auth/logout",
+      "GET /api/v1/me",
+    ]);
+    expect(requestHeader(calls[4], "authorization")).toBe("Bearer token-a2");
     expect(auth.state.status).toBe("unauthenticated");
     expect(auth.getAccessToken()).toBeNull();
   });
@@ -725,4 +769,17 @@ async function waitForCalls(calls: FetchCall[], count: number): Promise<void> {
   }
 
   throw new Error(`Expected ${count} fetch calls, received ${calls.length}`);
+}
+
+function requestSummary(calls: FetchCall[]): string[] {
+  return calls.map((call) => {
+    const url = new URL(String(call.input));
+    const method = call.init?.method ?? "GET";
+
+    return `${method} ${url.pathname}`;
+  });
+}
+
+function requestHeader(call: FetchCall, name: string): string | null {
+  return new Headers(call.init?.headers).get(name);
 }
