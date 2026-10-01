@@ -9,9 +9,9 @@ This repository is intentionally separate from:
 
 ## Current Scope
 
-WEB-001 bootstraps the Web application foundation only. It does not implement
-authentication, API clients, portal shells, permissions, themes, i18n, or product
-screens.
+WEB-002 defines the initial repository architecture and environment strategy. It
+does not implement authentication, API clients, portal shells, permissions,
+themes, i18n, or product screens.
 
 ## Technology Baseline
 
@@ -31,6 +31,10 @@ screens.
 bun install
 ```
 
+Environment variables are documented in `.env.example`. Copy it to `.env.local`
+for local development if you need to provide optional values. Real `.env` files
+are ignored and must not be committed.
+
 ## Development
 
 ```bash
@@ -47,4 +51,9 @@ bun run build
 ```
 
 `bun run test` is currently a placeholder quality gate for WEB-001 and runs the
-TypeScript check. A dedicated test stack belongs to WEB-005.
+repository-local Bun tests required by current foundation work. A larger test
+stack belongs to WEB-005.
+
+## Architecture
+
+Repository conventions are documented in `docs/architecture.md`.
