@@ -68,6 +68,53 @@ need browser APIs, event handlers, or client-side state. Keep server-only config
 and future secrets behind server modules so they cannot be bundled into browser
 code.
 
+## Themes And Appearance
+
+WEB-003 defines a compact semantic token foundation in `src/app/globals.css`.
+Product code should consume semantic variables such as `--color-background`,
+`--color-foreground`, `--color-surface`, `--color-primary`, `--color-danger`,
+and `--color-focus` instead of raw palette colors.
+
+Theme and appearance are separate local preferences:
+
+- Theme key: `hassan-web-theme`
+- Appearance key: `hassan-web-appearance`
+
+The valid V1 themes are `summit`, `pulse`, and `forge`. The valid appearances
+are `light`, `dark`, and `system`. Invalid or stale stored values fall back to
+safe defaults. Preferences are local-only browser settings; no backend
+preference API is assumed.
+
+Root layout remains a Server Component. A small inline bootstrap script applies
+the stored theme and resolved appearance before hydration, while the client
+provider owns browser-only storage, OS color-scheme listeners, and interactive
+preference updates.
+
+## Internationalization And Direction
+
+WEB-004 supports Arabic and English through `src/i18n`. The locale model defines
+supported identifiers, the fallback locale, validation, labels, and the
+locale-to-direction mapping in one place so a future third language can be added
+without scattering Arabic/English-specific branching through components.
+
+V1 does not use locale-prefixed routes. The App Router route groups created by
+WEB-002 stay intact, and future public, auth, staff, and platform URLs are not
+locked to `/ar` or `/en` before real route and deep-link requirements exist.
+Locale is resolved on the server from the first-party `hassan_locale` cookie and
+falls back to English when the cookie is absent or invalid. This gives SSR the
+same locale that the browser will hydrate, while keeping language independent
+from future theme, light/dark/system appearance, auth, and workspace state.
+
+The root layout sets `html lang` and `dir` from the resolved locale. Arabic maps
+to `rtl`; English maps to `ltr`. Feature code should prefer logical CSS
+properties and direction-neutral layout conventions such as `inline-start`,
+`inline-end`, `padding-inline`, `margin-inline`, and flex/grid alignment instead
+of hardcoded left/right assumptions.
+
+Translation messages are organized by surface/namespace in `src/i18n/messages.ts`.
+Only real strings for existing surfaces should be added. Do not create speculative
+translation keys for screens that do not exist.
+
 ## Future Issue Ownership
 
 - WEB-003 owns semantic tokens, themes, and appearance modes.
