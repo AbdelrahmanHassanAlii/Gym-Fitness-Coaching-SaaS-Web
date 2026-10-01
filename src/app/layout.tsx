@@ -4,7 +4,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Hassan Gym & Fitness Coaching SaaS",
-  description: "Web application foundation for Hassan Gym & Fitness Coaching SaaS.",
+  description:
+    "Web application foundation for Hassan Gym & Fitness Coaching SaaS.",
 };
 
 export default function RootLayout({

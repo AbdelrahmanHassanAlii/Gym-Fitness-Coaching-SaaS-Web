@@ -25,6 +25,11 @@ bun-debug.log*
 # typescript
 *.tsbuildinfo
 
+# test output
+coverage/
+playwright-report/
+test-results/
+
 # OS / editor
 .DS_Store
 Thumbs.db
