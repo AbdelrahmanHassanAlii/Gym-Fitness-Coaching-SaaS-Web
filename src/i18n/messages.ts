@@ -45,6 +45,12 @@ export const messages = {
         title: "جلسة مصادق عليها",
       },
     },
+    access: {
+      checking: "جارٍ التحقق من الصلاحية...",
+      deniedTitle: "لا يمكنك الوصول",
+      deniedAction: "ليست لديك صلاحية لهذا الإجراء.",
+      unavailable: "تعذر تحميل معلومات الوصول. حاول مرة أخرى.",
+    },
   },
   en: {
     metadata: {
@@ -90,6 +96,12 @@ export const messages = {
         copy: "This is a small protected-route proof for the session layer.",
         title: "Authenticated session",
       },
+    },
+    access: {
+      checking: "Checking access...",
+      deniedTitle: "Access denied",
+      deniedAction: "You do not have permission for this action.",
+      unavailable: "Access information could not be loaded. Try again.",
     },
   },
 } as const satisfies Record<Locale, Record<string, unknown>>;

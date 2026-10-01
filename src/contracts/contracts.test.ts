@@ -9,7 +9,12 @@ import {
   isContractConfidenceLevel,
   isIdempotentCommandRouteGroup,
   isMandatorySensitiveDocumentCategory,
+  isPermissionKey,
   mandatorySensitiveDocumentCategories,
+  permissionContexts,
+  permissionEffects,
+  permissionKeys,
+  permissionScopeTypes,
   progressAnalyticsGranularities,
   supportContextTypes,
   supportSessionTypes,
@@ -75,5 +80,24 @@ describe("backend contract DTO foundation", () => {
       "week",
       "month",
     ]);
+  });
+
+  test("keeps audited permission identifiers explicit and role-free", () => {
+    expect(permissionContexts).toEqual(["PLATFORM", "WORKSPACE"]);
+    expect(permissionEffects).toEqual(["ALLOW", "DENY"]);
+    expect(permissionScopeTypes).toEqual([
+      "SELF",
+      "ASSIGNED_TRAINEES",
+      "SPECIFIC_TRAINEES",
+      "BRANCH",
+      "MULTIPLE_BRANCHES",
+      "WORKSPACE",
+    ]);
+    expect(permissionKeys).toContain("staff.permissions.manage");
+    expect(permissionKeys).toContain("platform_permissions.manage");
+    expect(permissionKeys).toContain("dashboard.relationship.read");
+    expect(isPermissionKey("support.sensitive_files.read")).toBe(true);
+    expect(isPermissionKey("GYM_MANAGER")).toBe(false);
+    expect(isPermissionKey("canEditUser")).toBe(false);
   });
 });
