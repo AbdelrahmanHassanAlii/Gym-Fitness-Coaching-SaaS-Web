@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AppProviders } from "@/app/providers";
 import { getLocaleDirection } from "@/i18n/locales";
 import { getMessages } from "@/i18n/messages";
 import { getRequestLocale } from "@/i18n/request-locale";
 import { getThemeBootstrapScript } from "@/theme/bootstrap";
-import { ThemeProvider } from "@/theme/ThemeProvider";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -33,7 +33,7 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );
