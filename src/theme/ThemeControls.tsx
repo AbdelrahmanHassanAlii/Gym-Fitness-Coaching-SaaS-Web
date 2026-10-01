@@ -20,17 +20,33 @@ const appearanceLabels: Record<AppearanceMode, string> = {
   system: "System",
 };
 
-export function ThemeControls() {
+type ThemeControlsLabels = {
+  appearanceLabel: string;
+  resolvedPrefix: string;
+  themeLabel: string;
+};
+
+type ThemeControlsProps = {
+  labels?: ThemeControlsLabels;
+};
+
+const defaultLabels: ThemeControlsLabels = {
+  appearanceLabel: "Appearance",
+  resolvedPrefix: "Resolved",
+  themeLabel: "Theme",
+};
+
+export function ThemeControls({ labels = defaultLabels }: ThemeControlsProps) {
   const { appearance, resolvedAppearance, setAppearance, setTheme, theme } = useThemePreferences();
 
   return (
     <form className="theme-controls" aria-label="Theme and appearance preview controls">
       <label className="theme-controls__field">
-        <span>Theme</span>
+        <span>{labels.themeLabel}</span>
         <select
           value={theme}
           onChange={(event) => setTheme(event.target.value as ThemeName)}
-          aria-label="Theme"
+          aria-label={labels.themeLabel}
         >
           {themes.map((themeName) => (
             <option key={themeName} value={themeName}>
@@ -41,11 +57,11 @@ export function ThemeControls() {
       </label>
 
       <label className="theme-controls__field">
-        <span>Appearance</span>
+        <span>{labels.appearanceLabel}</span>
         <select
           value={appearance}
           onChange={(event) => setAppearance(event.target.value as AppearanceMode)}
-          aria-label="Appearance"
+          aria-label={labels.appearanceLabel}
         >
           {appearances.map((appearanceMode) => (
             <option key={appearanceMode} value={appearanceMode}>
@@ -56,7 +72,7 @@ export function ThemeControls() {
       </label>
 
       <p className="theme-controls__status" aria-live="polite">
-        Resolved {resolvedAppearance}
+        {labels.resolvedPrefix} {resolvedAppearance}
       </p>
     </form>
   );

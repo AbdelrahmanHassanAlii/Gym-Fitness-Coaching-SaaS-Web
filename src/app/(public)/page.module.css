@@ -1,12 +1,38 @@
 .page {
   display: grid;
   min-height: 100vh;
+  padding-block: var(--space-7);
+  padding-inline: var(--space-5);
   place-items: center;
-  padding: var(--space-7) var(--space-5);
 }
 
 .main {
   width: min(100%, 720px);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-end: var(--space-6);
+}
+
+.toolbar label {
+  color: var(--color-text-muted);
+  display: grid;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  gap: var(--space-2);
+}
+
+.toolbar select {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-foreground);
+  font: inherit;
+  padding-block: var(--space-3);
+  padding-inline: var(--space-4) 2.5rem;
 }
 
 .eyebrow {
