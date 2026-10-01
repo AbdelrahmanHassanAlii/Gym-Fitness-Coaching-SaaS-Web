@@ -8,7 +8,7 @@ This document defines how the Web repo represents Backend wire contracts. It doe
 
 Use a hybrid DTO strategy.
 
-Web V1 should not use a blind generated client as the integration boundary because the current OpenAPI artifact has proven stale and some important behaviors are not expressible in OpenAPI. Web also should not import Backend TypeScript source or create a shared fourth repository/package.
+Web V1 should not use a blind generated client as the integration boundary because the Apidog OpenAPI file is a mutable generated workspace artifact in this local setup, not a committed Backend Git blob at the audited HEAD, and some important behaviors are not expressible in OpenAPI. Web also should not import Backend TypeScript source or create a shared fourth repository/package.
 
 The hybrid rule:
 
@@ -139,7 +139,7 @@ When a Backend contract changes before Web implements a feature:
 6. Add tests for any runtime literals or guards.
 7. Keep Backend source imports out of Web.
 
-Fail the review if generated OpenAPI is stale, if implementation evidence is missing for behavior-critical metadata, or if a DTO claims verified fields that source evidence does not prove.
+Fail the review if generated OpenAPI has not been compared with the audited Backend implementation, if implementation evidence is missing for behavior-critical metadata, or if a DTO claims verified fields that source evidence does not prove.
 
 ## WEB-006 Scope Guard
 

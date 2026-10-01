@@ -30,12 +30,15 @@ Confidence labels used by Web:
 
 Generator: `apps/backend/scripts/export-openapi.ts`, invoked by `bun run openapi:emit`.
 
-Checked artifact status:
+Git object status:
 
-| Artifact                                                | Paths | Operations | Method counts                                | Verdict                     |
-| ------------------------------------------------------- | ----: | ---------: | -------------------------------------------- | --------------------------- |
-| Existing `docs/apidog/openapi.json` before regeneration |   158 |        188 | GET 57, POST 102, PUT 9, PATCH 16, DELETE 4  | Stale                       |
-| Fresh implementation export                             |   197 |        233 | GET 78, POST 121, PUT 10, PATCH 17, DELETE 7 | Current generated inventory |
+| Artifact at Backend `HEAD`                                            | Paths | Operations | Method counts                                | Verdict                                                                      |
+| --------------------------------------------------------------------- | ----: | ---------: | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `HEAD:docs/apidog/openapi.json`                                       |   n/a |        n/a | n/a                                          | Not present in the Backend Git tree                                          |
+| Root workspace `docs/apidog/openapi.json` before WEB-006 regeneration |   158 |        188 | GET 57, POST 102, PUT 9, PATCH 16, DELETE 4  | Mutable generated workspace artifact observed during the first WEB-006 audit |
+| Root workspace `docs/apidog/openapi.json` after regeneration          |   197 |        233 | GET 78, POST 121, PUT 10, PATCH 17, DELETE 7 | Current implementation-generated inventory                                   |
+
+Final review note: `docs/apidog/openapi.json` is outside the Backend Git repository in this local workspace. It is a generated workspace artifact, not a committed blob at Backend `HEAD`. A later read of the same physical workspace can show 197/233 if another audit or `openapi:emit` has regenerated it. The deterministic Git answer for `d926cacccbfb6cfb68ca578a8d1895be47bf81b1` is that no `HEAD:docs/apidog/openapi.json` blob exists.
 
 Important limitations:
 
