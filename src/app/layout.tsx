@@ -1,19 +1,30 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { getLocaleDirection } from "@/i18n/locales";
+import { getMessages } from "@/i18n/messages";
+import { getRequestLocale } from "@/i18n/request-locale";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Hassan Gym & Fitness Coaching SaaS",
-  description: "Web application foundation for Hassan Gym & Fitness Coaching SaaS.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getRequestLocale();
+  const { metadata } = getMessages(locale);
 
-export default function RootLayout({
+  return {
+    title: metadata.title,
+    description: metadata.description,
+  };
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) {
+  const locale = await getRequestLocale();
+  const direction = getLocaleDirection(locale);
+
   return (
-    <html lang="en">
+    <html lang={locale} dir={direction}>
       <body>{children}</body>
     </html>
   );
