@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import type {
@@ -13,9 +13,15 @@ import type {
   UpdateBranchRequestDto,
   UpdateWorkspaceRequestDto,
   WorkspaceMembershipRole,
+  WorkspaceMembershipStatus,
 } from "@/contracts";
 import { workspaceMembershipRoles } from "@/contracts";
 import { isApiError } from "@/lib/api";
+import {
+  AccessControlledButton,
+  evaluateAccess,
+  type AccessDecision,
+} from "@/lib/access";
 import { useAuthSession } from "@/lib/auth";
 import { useStaffWorkspaceContext } from "@/lib/staff-shell";
 import {
@@ -57,7 +63,14 @@ type WorkspaceManagementLabels = {
     empty: string;
     title: string;
   };
+  confirm: {
+    archiveBranch: string;
+    endMembership: string;
+    removeAssignment: string;
+    suspendMembership: string;
+  };
   errors: {
+    accessUnavailable: string;
     conflict: string;
     denied: string;
     malformed: string;
@@ -112,6 +125,8 @@ type InviteFormValues = {
   roles: WorkspaceMembershipRole[];
 };
 
+type WorkspaceManagementMemberStatus = WorkspaceMembershipStatus;
+
 const emptyWorkspaceForm: WorkspaceFormValues = {
   city: "",
   defaultLanguage: "en",
@@ -119,6 +134,8 @@ const emptyWorkspaceForm: WorkspaceFormValues = {
   name: "",
   timezone: "",
 };
+
+const commandLocksByOwner = new Map<string, Set<string>>();
 
 const emptyBranchForm: BranchFormValues = {
   address: "",
@@ -144,7 +161,8 @@ export function WorkspaceManagement({
 }) {
   const queryClient = useQueryClient();
   const { apiClient, generation, state } = useAuthSession();
-  const { shellContext, workspace } = useStaffWorkspaceContext();
+  const { accessFacts, shellContext, workspace } = useStaffWorkspaceContext();
+  const commandLockOwner = useId();
   const [selectedMembershipId, setSelectedMembershipId] =
     useState<MembershipId | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -197,6 +215,12 @@ export function WorkspaceManagement({
     memberships.find((member) => member.id === selectedMembershipId)?.id ??
     memberships[0]?.id ??
     null;
+
+  useEffect(() => {
+    return () => {
+      commandLocksByOwner.delete(commandLockOwner);
+    };
+  }, [commandLockOwner]);
 
   const assignmentsQuery = useQuery({
     enabled: canQuery && selectedMembershipIdSafe !== null,
@@ -388,6 +412,51 @@ export function WorkspaceManagement({
       (assignmentsQuery.data ?? []).filter((assignment) => assignment.active),
     [assignmentsQuery.data],
   );
+  const actionDecision = (
+    permission:
+      | "branches.archive"
+      | "branches.create"
+      | "branches.update"
+      | "staff.branches.manage"
+      | "staff.invite"
+      | "staff.manage"
+      | "workspace.update",
+    branchId?: BranchId,
+  ): AccessDecision => {
+    return evaluateAccess(accessFacts, {
+      accessContext,
+      branchId,
+      context: "WORKSPACE",
+      permission,
+      scope: branchId ? "branch" : "workspace",
+      sessionGeneration: generation,
+      workspaceId: workspaceId ?? undefined,
+    });
+  };
+
+  const workspaceUpdateDecision = actionDecision("workspace.update");
+  const branchCreateDecision = actionDecision("branches.create");
+  const staffInviteDecision = actionDecision("staff.invite");
+  const staffManageDecision = actionDecision("staff.manage");
+
+  const runOnce = async (
+    key: string,
+    action: () => Promise<unknown>,
+  ): Promise<void> => {
+    const commandLocks = getCommandLocks(commandLockOwner);
+    if (commandLocks.has(key)) {
+      return;
+    }
+
+    commandLocks.add(key);
+    try {
+      await action();
+    } catch {
+      // React Query mutation callbacks already publish user-facing errors.
+    } finally {
+      commandLocks.delete(key);
+    }
+  };
 
   if (workspaceId === null || shellContext === null) {
     return (
@@ -448,7 +517,13 @@ export function WorkspaceManagement({
         <form
           className={styles.formGrid}
           onSubmit={workspaceForm.handleSubmit((values) => {
-            workspaceMutation.mutate(cleanObject(values));
+            if (!workspaceUpdateDecision.allowed) {
+              return;
+            }
+
+            void runOnce("workspace:update", () =>
+              workspaceMutation.mutateAsync(cleanObject(values)),
+            );
           })}
         >
           <TextField
@@ -476,9 +551,18 @@ export function WorkspaceManagement({
             label={labels.fields.governorate}
             registration={workspaceForm.register("governorate")}
           />
-          <button disabled={workspaceMutation.isPending} type="submit">
+          <AccessControlledButton
+            decision={workspaceUpdateDecision}
+            disabled={workspaceMutation.isPending}
+            disabledReason={accessDisabledReason(
+              workspaceUpdateDecision,
+              labels,
+            )}
+            loadingLabel={labels.errors.accessUnavailable}
+            type="submit"
+          >
             {labels.actions.save}
-          </button>
+          </AccessControlledButton>
         </form>
       </section>
 
@@ -489,23 +573,37 @@ export function WorkspaceManagement({
           {branches.map((branch) => (
             <BranchRow
               branch={branch}
+              archiveDecision={actionDecision("branches.archive", branch.id)}
               key={branch.id}
               labels={labels}
-              onArchive={() => archiveBranchMutation.mutate(branch.id)}
+              onArchive={() =>
+                runOnce(`branch:${branch.id}:archive`, () =>
+                  archiveBranchMutation.mutateAsync(branch.id),
+                )
+              }
               onSave={(body) =>
-                updateBranch(apiClient, workspaceId, branch.id, body)
-                  .then(invalidateWorkspace)
-                  .then(() => handleSuccess(labels.status.saved))
-                  .catch(handleError)
+                runOnce(`branch:${branch.id}:update`, () =>
+                  updateBranch(apiClient, workspaceId, branch.id, body)
+                    .then(invalidateWorkspace)
+                    .then(() => handleSuccess(labels.status.saved))
+                    .catch(handleError),
+                )
               }
               pending={archiveBranchMutation.isPending}
+              updateDecision={actionDecision("branches.update", branch.id)}
             />
           ))}
         </div>
         <form
           className={styles.formGrid}
           onSubmit={branchForm.handleSubmit((values) => {
-            createBranchMutation.mutate(cleanObject(values));
+            if (!branchCreateDecision.allowed) {
+              return;
+            }
+
+            void runOnce("branch:create", () =>
+              createBranchMutation.mutateAsync(cleanObject(values)),
+            );
           })}
         >
           <TextField
@@ -532,9 +630,15 @@ export function WorkspaceManagement({
             label={labels.fields.governorate}
             registration={branchForm.register("governorate")}
           />
-          <button disabled={createBranchMutation.isPending} type="submit">
+          <AccessControlledButton
+            decision={branchCreateDecision}
+            disabled={createBranchMutation.isPending}
+            disabledReason={accessDisabledReason(branchCreateDecision, labels)}
+            loadingLabel={labels.errors.accessUnavailable}
+            type="submit"
+          >
             {labels.actions.create}
-          </button>
+          </AccessControlledButton>
         </form>
       </section>
 
@@ -551,42 +655,44 @@ export function WorkspaceManagement({
                 </p>
               </div>
               <div className={styles.actions}>
-                <button
-                  disabled={membershipMutation.isPending}
-                  onClick={() =>
-                    membershipMutation.mutate({
-                      command: "suspend",
-                      membershipId: member.id,
-                    })
-                  }
-                  type="button"
-                >
-                  {labels.actions.suspend}
-                </button>
-                <button
-                  disabled={membershipMutation.isPending}
-                  onClick={() =>
-                    membershipMutation.mutate({
-                      command: "reactivate",
-                      membershipId: member.id,
-                    })
-                  }
-                  type="button"
-                >
-                  {labels.actions.reactivate}
-                </button>
-                <button
-                  disabled={membershipMutation.isPending}
-                  onClick={() =>
-                    membershipMutation.mutate({
-                      command: "end",
-                      membershipId: member.id,
-                    })
-                  }
-                  type="button"
-                >
-                  {labels.actions.end}
-                </button>
+                {membershipCommands(member.status).map((command) => (
+                  <AccessControlledButton
+                    decision={staffManageDecision}
+                    disabled={membershipMutation.isPending}
+                    disabledReason={accessDisabledReason(
+                      staffManageDecision,
+                      labels,
+                    )}
+                    key={command}
+                    loadingLabel={labels.errors.accessUnavailable}
+                    onClick={() => {
+                      if (
+                        (command === "suspend" &&
+                          !confirmTarget(
+                            labels.confirm.suspendMembership,
+                            member.id,
+                          )) ||
+                        (command === "end" &&
+                          !confirmTarget(
+                            labels.confirm.endMembership,
+                            member.id,
+                          ))
+                      ) {
+                        return;
+                      }
+
+                      void runOnce(`membership:${member.id}:${command}`, () =>
+                        membershipMutation.mutateAsync({
+                          command,
+                          membershipId: member.id,
+                        }),
+                      );
+                    }}
+                    type="button"
+                  >
+                    {labels.actions[command]}
+                  </AccessControlledButton>
+                ))}
               </div>
             </article>
           ))}
@@ -599,15 +705,26 @@ export function WorkspaceManagement({
         <form
           className={styles.formGrid}
           onSubmit={inviteForm.handleSubmit((values) => {
-            inviteMutation.mutate({
-              ...cleanObject({
-                email: values.email,
-                expiresAt: values.expiresAt,
-                phone: values.phone,
+            if (!staffInviteDecision.allowed) {
+              return;
+            }
+
+            const branchIds = arrayValue(values.branchIds);
+            const roles = arrayValue(values.roles).filter(
+              (role) => role !== "TRAINEE",
+            );
+
+            void runOnce("staff:invite", () =>
+              inviteMutation.mutateAsync({
+                ...cleanObject({
+                  email: values.email,
+                  expiresAt: values.expiresAt,
+                  phone: values.phone,
+                }),
+                branchIds,
+                roles,
               }),
-              branchIds: values.branchIds,
-              roles: values.roles,
-            });
+            );
           })}
         >
           <TextField
@@ -653,9 +770,15 @@ export function WorkspaceManagement({
               </label>
             ))}
           </fieldset>
-          <button disabled={inviteMutation.isPending} type="submit">
+          <AccessControlledButton
+            decision={staffInviteDecision}
+            disabled={inviteMutation.isPending}
+            disabledReason={accessDisabledReason(staffInviteDecision, labels)}
+            loadingLabel={labels.errors.accessUnavailable}
+            type="submit"
+          >
             {labels.actions.invite}
-          </button>
+          </AccessControlledButton>
         </form>
       </section>
 
@@ -685,18 +808,45 @@ export function WorkspaceManagement({
                 <span>{labels.assignment.selectBranch}</span>
                 <select
                   onChange={(event) => {
+                    const branchId = event.target.value as BranchId;
+                    const decision = actionDecision(
+                      "staff.branches.manage",
+                      branchId,
+                    );
                     if (selectedMembershipIdSafe) {
-                      assignMutation.mutate({
-                        branchId: event.target.value as BranchId,
-                        membershipId: selectedMembershipIdSafe,
-                      });
+                      if (!decision.allowed) {
+                        return;
+                      }
+
+                      void runOnce(
+                        `assignment:${selectedMembershipIdSafe}:${branchId}:add`,
+                        () =>
+                          assignMutation.mutateAsync({
+                            branchId,
+                            membershipId: selectedMembershipIdSafe,
+                          }),
+                      );
                     }
                   }}
+                  disabled={
+                    !branches.some(
+                      (branch) =>
+                        actionDecision("staff.branches.manage", branch.id)
+                          .allowed,
+                    )
+                  }
                   value=""
                 >
                   <option value="">{labels.actions.assign}</option>
                   {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
+                    <option
+                      disabled={
+                        !actionDecision("staff.branches.manage", branch.id)
+                          .allowed
+                      }
+                      key={branch.id}
+                      value={branch.id}
+                    >
                       {branch.name}
                     </option>
                   ))}
@@ -707,13 +857,39 @@ export function WorkspaceManagement({
               {activeAssignments.map((assignment) => (
                 <article className={styles.item} key={assignment.id}>
                   <p>{branchName(branches, assignment.branchId)}</p>
-                  <button
+                  <AccessControlledButton
+                    decision={actionDecision(
+                      "staff.branches.manage",
+                      assignment.branchId,
+                    )}
                     disabled={removeAssignmentMutation.isPending}
-                    onClick={() => removeAssignmentMutation.mutate(assignment)}
+                    disabledReason={accessDisabledReason(
+                      actionDecision(
+                        "staff.branches.manage",
+                        assignment.branchId,
+                      ),
+                      labels,
+                    )}
+                    loadingLabel={labels.errors.accessUnavailable}
+                    onClick={() => {
+                      if (
+                        !confirmTarget(
+                          labels.confirm.removeAssignment,
+                          branchName(branches, assignment.branchId),
+                        )
+                      ) {
+                        return;
+                      }
+
+                      void runOnce(
+                        `assignment:${assignment.membershipId}:${assignment.branchId}:remove`,
+                        () => removeAssignmentMutation.mutateAsync(assignment),
+                      );
+                    }}
                     type="button"
                   >
                     {labels.actions.removeAssignment}
-                  </button>
+                  </AccessControlledButton>
                 </article>
               ))}
             </div>
@@ -725,17 +901,21 @@ export function WorkspaceManagement({
 }
 
 function BranchRow({
+  archiveDecision,
   branch,
   labels,
   onArchive,
   onSave,
   pending,
+  updateDecision,
 }: {
+  archiveDecision: AccessDecision;
   branch: BranchDto;
   labels: WorkspaceManagementLabels;
-  onArchive: () => void;
-  onSave: (body: UpdateBranchRequestDto) => void;
+  onArchive: () => Promise<void>;
+  onSave: (body: UpdateBranchRequestDto) => Promise<void>;
   pending: boolean;
+  updateDecision: AccessDecision;
 }) {
   const form = useForm<BranchFormValues>({
     defaultValues: {
@@ -752,7 +932,13 @@ function BranchRow({
     <article className={styles.item}>
       <form
         className={styles.inlineForm}
-        onSubmit={form.handleSubmit((values) => onSave(cleanObject(values)))}
+        onSubmit={form.handleSubmit((values) => {
+          if (!updateDecision.allowed) {
+            return;
+          }
+
+          void onSave(cleanObject(values));
+        })}
       >
         <TextField
           label={labels.fields.branchName}
@@ -763,10 +949,32 @@ function BranchRow({
           registration={form.register("timezone")}
         />
         <span>{branch.status}</span>
-        <button type="submit">{labels.actions.save}</button>
-        <button disabled={pending} onClick={onArchive} type="button">
-          {labels.actions.archive}
-        </button>
+        <AccessControlledButton
+          decision={updateDecision}
+          disabledReason={accessDisabledReason(updateDecision, labels)}
+          loadingLabel={labels.errors.accessUnavailable}
+          type="submit"
+        >
+          {labels.actions.save}
+        </AccessControlledButton>
+        {branch.status === "ACTIVE" ? (
+          <AccessControlledButton
+            decision={archiveDecision}
+            disabled={pending}
+            disabledReason={accessDisabledReason(archiveDecision, labels)}
+            loadingLabel={labels.errors.accessUnavailable}
+            onClick={() => {
+              if (!confirmTarget(labels.confirm.archiveBranch, branch.name)) {
+                return;
+              }
+
+              void onArchive();
+            }}
+            type="button"
+          >
+            {labels.actions.archive}
+          </AccessControlledButton>
+        ) : null}
       </form>
     </article>
   );
@@ -806,6 +1014,56 @@ function branchName(
   branchId: BranchId,
 ): string {
   return branches.find((branch) => branch.id === branchId)?.name ?? branchId;
+}
+
+function confirmTarget(template: string, target: string): boolean {
+  return window.confirm(template.replace("{target}", target));
+}
+
+function getCommandLocks(owner: string): Set<string> {
+  const existing = commandLocksByOwner.get(owner);
+  if (existing) {
+    return existing;
+  }
+
+  const locks = new Set<string>();
+  commandLocksByOwner.set(owner, locks);
+  return locks;
+}
+
+function arrayValue<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+function membershipCommands(
+  status: WorkspaceManagementMemberStatus,
+): Array<"end" | "reactivate" | "suspend"> {
+  if (status === "ACTIVE") {
+    return ["suspend", "end"];
+  }
+
+  if (status === "SUSPENDED") {
+    return ["reactivate", "end"];
+  }
+
+  if (status === "ENDED") {
+    return ["reactivate"];
+  }
+
+  return [];
+}
+
+function accessDisabledReason(
+  decision: AccessDecision,
+  labels: WorkspaceManagementLabels,
+): string {
+  return decision.status === "unavailable"
+    ? labels.errors.accessUnavailable
+    : labels.errors.denied;
 }
 
 function errorMessage(

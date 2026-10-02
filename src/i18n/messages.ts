@@ -148,6 +148,12 @@ export const messages = {
         title: "الفروع",
         empty: "لا توجد فروع في هذه المساحة حتى الآن.",
       },
+      confirm: {
+        archiveBranch: "هل تريد أرشفة {target}؟",
+        endMembership: "هل تريد إنهاء عضوية {target}؟",
+        removeAssignment: "هل تريد إزالة تعيين {target}؟",
+        suspendMembership: "هل تريد إيقاف عضوية {target}؟",
+      },
       staff: {
         title: "العضويات والطاقم",
         empty: "لا توجد عضويات طاقم قابلة للعرض.",
@@ -189,6 +195,7 @@ export const messages = {
         suspend: "إيقاف",
       },
       errors: {
+        accessUnavailable: "معلومات الصلاحيات غير كافية لتفعيل هذا الإجراء.",
         conflict:
           "تغيرت البيانات على الخادم. حدّث الصفحة وراجع التغييرات قبل الحفظ.",
         denied: "رفض الخادم هذا الإجراء لصلاحيات الحساب الحالية.",
@@ -350,6 +357,12 @@ export const messages = {
         title: "Branches",
         empty: "This workspace has no branches yet.",
       },
+      confirm: {
+        archiveBranch: "Archive {target}?",
+        endMembership: "End membership {target}?",
+        removeAssignment: "Remove assignment for {target}?",
+        suspendMembership: "Suspend membership {target}?",
+      },
       staff: {
         title: "Memberships and staff",
         empty: "There are no staff memberships to display.",
@@ -392,6 +405,7 @@ export const messages = {
         suspend: "Suspend",
       },
       errors: {
+        accessUnavailable: "Access facts are unavailable for this action.",
         conflict: "The server state changed. Refresh and review before saving.",
         denied: "The Backend rejected this action for the current access.",
         malformed:

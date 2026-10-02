@@ -260,6 +260,7 @@ export function StaffShell({
           {workspaceStatus === "ready" ? (
             <StaffWorkspaceProvider
               value={{
+                accessFacts,
                 shellContext: context,
                 workspace: selectedWorkspace,
               }}

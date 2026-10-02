@@ -34,6 +34,18 @@ denied and do not log the user out; 401/session expiry remains WEB-007/WEB-009.
 WEB-012 does not use the admin effective-access inspection route as a universal
 current-user `can(permission)` endpoint.
 
+Mutation controls fail closed unless the current staff-shell context includes
+WEB-010 access facts for the exact Backend permission and scope. Missing,
+unresolved, stale, or unavailable access facts disable the command rather than
+optimistically exposing it. This is still only presentation behavior; direct
+Backend calls remain protected by Backend authorization.
+
+The current membership lifecycle UI is derived only from Backend-supported
+status transitions: `ACTIVE` can suspend or end, `SUSPENDED` can reactivate or
+end, and `ENDED` can reactivate. `INVITED` and `ARCHIVED` memberships do not
+show these lifecycle commands. Backend remains the source of truth for all
+business invariants and may still reject a displayed command.
+
 ## Cache And Context
 
 Management query keys include the authenticated session generation, workspace
@@ -58,6 +70,17 @@ universal field mapper.
 Mutations explicitly set `retry: false`. WEB-012 does not invent
 `expectedVersion`, does not regenerate idempotency keys, does not apply generic
 optimistic updates, and does not silently overwrite 409/conflict responses.
+Workspace, branch, membership lifecycle, invitation, and branch-assignment
+commands do not use `expectedVersion` in the verified Backend route/service
+source, and WEB-012 does not add synthetic CAS fields. The Backend idempotency
+wrapper is not applied to these WEB-012 commands; the UI therefore does not send
+unsupported `Idempotency-Key` values. Destructive or disruptive commands require
+an explicit target confirmation and use Backend lifecycle terminology such as
+archive, suspend, end, or remove assignment instead of implying hard deletion.
+
+Invitation role selection excludes `TRAINEE` from the staff invite UI and
+defensively filters it from the command payload. Staff invitation tokens returned
+by the Backend are not persisted or displayed by this UI.
 
 ## Runtime Guards
 
