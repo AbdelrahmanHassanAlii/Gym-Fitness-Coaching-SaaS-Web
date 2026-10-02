@@ -1,0 +1,17 @@
+.overview {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 44rem;
+}
+
+.overview h1 {
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-tight);
+  margin: 0;
+}
+
+.overview p {
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+  margin: 0;
+}
