@@ -198,6 +198,112 @@ describe("staff shell", () => {
     expect(screen.getByText("Pulse Gym")).toBeInTheDocument();
   });
 
+  test("late workspace response cannot restore stale workspace shell state", async () => {
+    const workspaceARequest =
+      deferred<ApiDataEnvelope<readonly MyWorkspaceDto[]>>();
+    mocks.authSession.apiClient.request.mockReturnValueOnce(
+      workspaceARequest.promise,
+    );
+    const queryClient = createTestQueryClient();
+    const { rerender } = render(staffShellTree("en", queryClient));
+
+    expect(screen.getByText("Loading workspaces...")).toBeInTheDocument();
+
+    mocks.authSession.generation = 2;
+    mocks.authSession.state = {
+      accessToken: "token-b",
+      restrictedUntilVerified: false,
+      status: "authenticated",
+      user: user("Badr", "Manager"),
+    } as AuthState;
+    mocks.authSession.apiClient.request.mockResolvedValueOnce({
+      data: [workspaceB],
+    });
+    rerender(staffShellTree("en", queryClient));
+
+    expect(await screen.findByText("Pulse Gym")).toBeInTheDocument();
+    workspaceARequest.resolve({ data: [staffWorkspace] });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Summit Gym")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Badr Manager")).toBeInTheDocument();
+  });
+
+  test("logout state removes protected shell immediately", async () => {
+    mockWorkspaces([staffWorkspace]);
+    const queryClient = createTestQueryClient();
+    const { rerender } = render(staffShellTree("en", queryClient));
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+
+    mocks.authSession.state = {
+      accessToken: null,
+      restrictedUntilVerified: false,
+      status: "unauthenticated",
+      user: null,
+    } as AuthState;
+    rerender(staffShellTree("en", queryClient));
+
+    expect(screen.getByText("Loading staff shell...")).toBeInTheDocument();
+    expect(screen.queryByText("Summit Gym")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gym staff shell")).not.toBeInTheDocument();
+  });
+
+  test("malformed workspace rows and unknown roles fail closed", async () => {
+    mockWorkspaceData([
+      {
+        membership: {
+          ...staffWorkspace.membership,
+          roles: ["GYM_OWNER", "UNKNOWN_ROLE"],
+        },
+        workspace: staffWorkspace.workspace,
+      },
+      {
+        membership: {
+          ...workspaceB.membership,
+          id: undefined,
+        },
+        workspace: workspaceB.workspace,
+      },
+    ]);
+
+    renderStaffShell();
+
+    expect(
+      await screen.findByText("No staff workspace available"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Gym staff shell")).not.toBeInTheDocument();
+  });
+
+  test("future product navigation is visible but not actionable", async () => {
+    mockWorkspaces([staffWorkspace]);
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Overview/i })).toHaveAttribute(
+      "href",
+      "/app",
+    );
+    for (const label of [
+      "Workspace",
+      "Staff",
+      "Leads",
+      "Relationships",
+      "Training",
+      "Nutrition",
+      "Progress",
+      "Documents",
+      "Notifications",
+      "Analytics",
+    ]) {
+      expect(
+        screen.queryByRole("link", { name: new RegExp(`^${label}\\b`, "i") }),
+      ).not.toBeInTheDocument();
+    }
+  });
+
   test("responsive menu toggles accessibly and keyboard activation works", async () => {
     mockWorkspaces([staffWorkspace]);
 
@@ -227,19 +333,35 @@ describe("staff shell", () => {
       screen.getByRole("button", { name: "فتح التنقل" }),
     ).toBeInTheDocument();
   });
+
+  test("LTR shell remains isolated after Arabic RTL render", async () => {
+    mockWorkspaces([staffWorkspace]);
+    const { unmount } = renderStaffShell("ar");
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    expect(
+      screen.getByText("بوابة طاقم الجيم").closest("[dir='rtl']"),
+    ).toBeInTheDocument();
+
+    unmount();
+    mockWorkspaces([staffWorkspace]);
+    renderStaffShell("en");
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    expect(
+      screen.getByText("Gym Staff Portal").closest("[dir='ltr']"),
+    ).toBeInTheDocument();
+  });
 });
 
 function renderStaffShell(locale: "ar" | "en" = "en") {
   return render(staffShellTree(locale));
 }
 
-function staffShellTree(locale: "ar" | "en" = "en") {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  });
-
+function staffShellTree(
+  locale: "ar" | "en" = "en",
+  queryClient = createTestQueryClient(),
+) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
@@ -258,6 +380,10 @@ function staffShellTree(locale: "ar" | "en" = "en") {
 }
 
 function mockWorkspaces(items: readonly MyWorkspaceDto[]) {
+  mockWorkspaceData(items);
+}
+
+function mockWorkspaceData(items: unknown) {
   mocks.authSession.apiClient.request.mockResolvedValue({ data: items });
 }
 
@@ -279,6 +405,7 @@ function workspace(input: {
   return {
     membership: {
       accessVersion: 1,
+      engagementPeriods: [],
       id: `membership_${input.workspaceId}` as MyWorkspaceDto["membership"]["id"],
       joinedAt: "2026-01-01T00:00:00.000Z",
       permissionProfileIds: [],
@@ -309,4 +436,12 @@ function deferred<T>(): {
   });
 
   return { promise, resolve };
+}
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
 }

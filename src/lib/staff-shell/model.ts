@@ -8,12 +8,11 @@ import type {
   BranchId,
   GymStaffRole,
   MembershipId,
-  MyWorkspaceDto,
   PermissionKey,
   WorkspaceId,
   WorkspaceMembershipRole,
 } from "@/contracts";
-import { isGymStaffRole } from "@/contracts";
+import { isGymStaffRole, isMyWorkspaceDto } from "@/contracts";
 import type { AuthorizationCacheContext } from "@/lib/server-state";
 
 export const staffShellPortal = "gym-staff" as const;
@@ -97,11 +96,11 @@ const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
   };
 
 export function selectStaffWorkspaces(
-  workspaces: readonly MyWorkspaceDto[],
+  workspaces: readonly unknown[],
 ): StaffWorkspaceOption[] {
   const selected: StaffWorkspaceOption[] = [];
 
-  for (const item of workspaces) {
+  for (const item of workspaces.filter(isMyWorkspaceDto)) {
     const roles = item.membership.roles.filter(isGymStaffRole);
 
     if (

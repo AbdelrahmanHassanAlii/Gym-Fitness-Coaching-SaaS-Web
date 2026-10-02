@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import type { ApiDataEnvelope, MyWorkspaceDto, WorkspaceId } from "@/contracts";
+import type { ApiDataEnvelope, WorkspaceId } from "@/contracts";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { useAuthSession } from "@/lib/auth";
@@ -80,15 +80,13 @@ export function StaffShell({
   const workspacesQuery = useQuery({
     enabled: state.status === "authenticated",
     queryFn: async ({ signal }) => {
-      const envelope = await apiClient.request<
-        ApiDataEnvelope<readonly MyWorkspaceDto[]>
-      >({
+      const envelope = await apiClient.request<ApiDataEnvelope<unknown>>({
         method: "GET",
         path: "/me/workspaces",
         signal,
       });
 
-      return envelope.data;
+      return Array.isArray(envelope.data) ? envelope.data : [];
     },
     queryKey: appQueryKeys.resource(
       ["staff-shell", "workspaces", generation],

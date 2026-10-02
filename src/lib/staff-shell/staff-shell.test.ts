@@ -104,6 +104,76 @@ describe("staff shell model", () => {
     });
   });
 
+  test("same access facts produce identical protected navigation for different staff roles", () => {
+    const trainer = selectStaffWorkspaces([
+      myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),
+    ])[0];
+    const owner = selectStaffWorkspaces([
+      myWorkspace({ roles: ["GYM_OWNER"], workspaceId: workspaceA }),
+    ])[0];
+    const accessFacts = accessFactsFromDecision({
+      decisions: [decision("staff.read", false, "DENY")],
+      membershipId: membershipA,
+      sessionGeneration: 1,
+      workspaceId: workspaceA,
+    });
+
+    const trainerNav = createStaffNavigation({
+      accessFacts,
+      context: createStaffShellContext({
+        branchLabel: "All branches",
+        sessionGeneration: 1,
+        workspace: trainer,
+      }),
+      labels: navLabels,
+    });
+    const ownerNav = createStaffNavigation({
+      accessFacts,
+      context: createStaffShellContext({
+        branchLabel: "All branches",
+        sessionGeneration: 1,
+        workspace: owner,
+      }),
+      labels: navLabels,
+    });
+
+    expect(ownerNav.find((item) => item.id === "staff")?.status).toBe(
+      trainerNav.find((item) => item.id === "staff")?.status,
+    );
+    expect(ownerNav.find((item) => item.id === "staff")).toMatchObject({
+      status: "denied",
+    });
+  });
+
+  test("malformed workspace contract data cannot create staff shell context", () => {
+    const selected = selectStaffWorkspaces([
+      {
+        membership: {
+          ...myWorkspace({ roles: ["GYM_OWNER"], workspaceId: workspaceA })
+            .membership,
+          roles: ["GYM_OWNER", "NOT_A_BACKEND_ROLE"],
+        },
+        workspace: myWorkspace({
+          roles: ["GYM_OWNER"],
+          workspaceId: workspaceA,
+        }).workspace,
+      },
+      {
+        membership: {
+          ...myWorkspace({ roles: ["GYM_MANAGER"], workspaceId: workspaceB })
+            .membership,
+          id: undefined,
+        },
+        workspace: myWorkspace({
+          roles: ["GYM_MANAGER"],
+          workspaceId: workspaceB,
+        }).workspace,
+      },
+    ]);
+
+    expect(selected).toEqual([]);
+  });
+
   test("session workspace and support contexts fail closed when stale", () => {
     const workspace = selectStaffWorkspaces([
       myWorkspace({ roles: ["GYM_MANAGER"], workspaceId: workspaceA }),
@@ -181,6 +251,7 @@ function myWorkspace(input: {
   return {
     membership: {
       accessVersion: 1,
+      engagementPeriods: [],
       id: membershipA,
       joinedAt: "2026-01-01T00:00:00.000Z",
       permissionProfileIds: [],
