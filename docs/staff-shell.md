@@ -40,7 +40,7 @@ branch CRUD and does not infer that workspace membership grants every branch.
 
 ## Navigation
 
-Only `/app` is currently actionable. Future product areas are displayed as
-non-actionable shell destinations until their owning issues implement real
-routes. Disabled navigation is not a security boundary; Backend authorization
-remains authoritative for every API call.
+`/app` and WEB-012's `/app/workspace` management surface are actionable.
+Later product areas remain non-actionable shell destinations until their owning
+issues implement real routes. Disabled navigation is not a security boundary;
+Backend authorization remains authoritative for every API call.

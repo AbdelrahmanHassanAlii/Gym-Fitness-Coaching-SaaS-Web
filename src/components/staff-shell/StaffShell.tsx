@@ -14,6 +14,7 @@ import {
   createStaffNavigation,
   createStaffShellContext,
   selectStaffWorkspaces,
+  StaffWorkspaceProvider,
   type StaffShellContext,
   type StaffShellNavItemId,
 } from "@/lib/staff-shell";
@@ -256,7 +257,16 @@ export function StaffShell({
               <p>{labels.empty.copy}</p>
             </section>
           ) : null}
-          {workspaceStatus === "ready" ? children : null}
+          {workspaceStatus === "ready" ? (
+            <StaffWorkspaceProvider
+              value={{
+                shellContext: context,
+                workspace: selectedWorkspace,
+              }}
+            >
+              {children}
+            </StaffWorkspaceProvider>
+          ) : null}
         </main>
       </div>
     </div>

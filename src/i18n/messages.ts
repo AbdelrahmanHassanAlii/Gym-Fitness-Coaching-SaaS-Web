@@ -86,7 +86,7 @@ export const messages = {
         },
         workspace: {
           title: "المساحة والفروع",
-          description: "سيتم تنفيذ إدارة المساحة لاحقًا",
+          description: "إدارة إعدادات المساحة والفروع",
         },
         staff: {
           title: "الطاقم",
@@ -132,6 +132,73 @@ export const messages = {
       overview: {
         title: "واجهة طاقم الجيم",
         copy: "هذه الواجهة تثبت التنقل، وسياق مساحة العمل، وحدود الوصول قبل تنفيذ شاشات المنتجات.",
+      },
+    },
+    workspaceManagement: {
+      title: "إدارة المساحة والفروع والطاقم",
+      loading: "جارٍ تحميل بيانات الإدارة...",
+      noWorkspace: {
+        title: "لا توجد مساحة محددة",
+        copy: "اختر مساحة طاقم مؤهلة من الواجهة قبل إدارة بياناتها.",
+      },
+      workspace: {
+        title: "إعدادات المساحة",
+      },
+      branches: {
+        title: "الفروع",
+        empty: "لا توجد فروع في هذه المساحة حتى الآن.",
+      },
+      staff: {
+        title: "العضويات والطاقم",
+        empty: "لا توجد عضويات طاقم قابلة للعرض.",
+      },
+      invite: {
+        title: "دعوة عضو طاقم",
+        help: "ترسل الدعوة وفق عقد الخادم الحالي ولا تحفظ رمز الدعوة في الواجهة.",
+      },
+      assignment: {
+        title: "تعيينات الفروع",
+        empty: "أضف فرعًا وعضو طاقم قبل إدارة التعيينات.",
+        selectBranch: "اختر فرعًا للتعيين",
+        selectMember: "عضو الطاقم",
+      },
+      fields: {
+        address: "العنوان",
+        branch: "الفروع",
+        branchCode: "رمز الفرع",
+        branchName: "اسم الفرع",
+        city: "المدينة",
+        defaultLanguage: "اللغة الافتراضية",
+        email: "البريد الإلكتروني",
+        expiresAt: "تاريخ انتهاء الدعوة",
+        governorate: "المحافظة",
+        name: "الاسم",
+        phone: "الهاتف",
+        roles: "الأدوار",
+        timezone: "المنطقة الزمنية",
+      },
+      actions: {
+        archive: "أرشفة",
+        assign: "تعيين",
+        create: "إنشاء",
+        end: "إنهاء",
+        invite: "إرسال الدعوة",
+        reactivate: "إعادة التفعيل",
+        removeAssignment: "إزالة التعيين",
+        save: "حفظ",
+        suspend: "إيقاف",
+      },
+      errors: {
+        conflict:
+          "تغيرت البيانات على الخادم. حدّث الصفحة وراجع التغييرات قبل الحفظ.",
+        denied: "رفض الخادم هذا الإجراء لصلاحيات الحساب الحالية.",
+        malformed: "عاد الخادم ببيانات غير متوقعة، لذلك توقفت الواجهة بأمان.",
+        unavailable: "تعذر تحميل بيانات الإدارة. حاول مرة أخرى.",
+        validation: "راجع الحقول المطلوبة ثم حاول مرة أخرى.",
+      },
+      status: {
+        saved: "تم حفظ التغيير.",
+        sent: "تم إرسال الدعوة.",
       },
     },
   },
@@ -221,7 +288,7 @@ export const messages = {
         },
         workspace: {
           title: "Workspace & branches",
-          description: "Workspace management arrives in a later issue",
+          description: "Manage workspace settings and branches",
         },
         staff: {
           title: "Staff",
@@ -267,6 +334,74 @@ export const messages = {
       overview: {
         title: "Gym staff shell",
         copy: "This shell proves navigation, workspace context, and access boundaries before product screens are implemented.",
+      },
+    },
+    workspaceManagement: {
+      title: "Workspace, branch, and staff management",
+      loading: "Loading management data...",
+      noWorkspace: {
+        title: "No workspace selected",
+        copy: "Select an eligible staff workspace in the shell before managing it.",
+      },
+      workspace: {
+        title: "Workspace settings",
+      },
+      branches: {
+        title: "Branches",
+        empty: "This workspace has no branches yet.",
+      },
+      staff: {
+        title: "Memberships and staff",
+        empty: "There are no staff memberships to display.",
+      },
+      invite: {
+        title: "Invite staff",
+        help: "Invitations are sent through the verified Backend command; invitation tokens are not stored in the UI.",
+      },
+      assignment: {
+        title: "Branch assignments",
+        empty:
+          "Create a branch and staff membership before managing assignments.",
+        selectBranch: "Select branch to assign",
+        selectMember: "Staff member",
+      },
+      fields: {
+        address: "Address",
+        branch: "Branches",
+        branchCode: "Branch code",
+        branchName: "Branch name",
+        city: "City",
+        defaultLanguage: "Default language",
+        email: "Email",
+        expiresAt: "Invitation expiry",
+        governorate: "Governorate",
+        name: "Name",
+        phone: "Phone",
+        roles: "Roles",
+        timezone: "Timezone",
+      },
+      actions: {
+        archive: "Archive",
+        assign: "Assign",
+        create: "Create",
+        end: "End",
+        invite: "Send invite",
+        reactivate: "Reactivate",
+        removeAssignment: "Remove assignment",
+        save: "Save",
+        suspend: "Suspend",
+      },
+      errors: {
+        conflict: "The server state changed. Refresh and review before saving.",
+        denied: "The Backend rejected this action for the current access.",
+        malformed:
+          "The Backend returned unexpected data, so the UI failed closed.",
+        unavailable: "Management data could not be loaded. Try again.",
+        validation: "Review the required fields and try again.",
+      },
+      status: {
+        saved: "Change saved.",
+        sent: "Invitation sent.",
       },
     },
   },

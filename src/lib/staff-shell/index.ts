@@ -6,6 +6,10 @@ export {
   selectStaffWorkspaces,
   staffShellPortal,
 } from "./model";
+export {
+  StaffWorkspaceProvider,
+  useStaffWorkspaceContext,
+} from "./StaffWorkspaceContext";
 export type {
   StaffBranchContext,
   StaffShellAccessStatus,
@@ -14,3 +18,4 @@ export type {
   StaffShellNavItemId,
   StaffWorkspaceOption,
 } from "./model";
+export type { StaffWorkspaceContextValue } from "./StaffWorkspaceContext";

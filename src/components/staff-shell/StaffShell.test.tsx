@@ -276,7 +276,7 @@ describe("staff shell", () => {
     expect(screen.queryByText("Gym staff shell")).not.toBeInTheDocument();
   });
 
-  test("future product navigation is visible but not actionable", async () => {
+  test("workspace management navigation is actionable while later product navigation remains inactive", async () => {
     mockWorkspaces([staffWorkspace]);
 
     renderStaffShell();
@@ -286,8 +286,12 @@ describe("staff shell", () => {
       "href",
       "/app",
     );
+    expect(
+      screen.getByRole("link", {
+        name: /Workspace & branchesManage workspace settings and branches/i,
+      }),
+    ).toHaveAttribute("href", "/app/workspace");
     for (const label of [
-      "Workspace",
       "Staff",
       "Leads",
       "Relationships",

@@ -95,6 +95,10 @@ const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
     workspace: "workspace.read",
   };
 
+const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
+  workspace: "/app/workspace",
+};
+
 export function selectStaffWorkspaces(
   workspaces: readonly unknown[],
 ): StaffWorkspaceOption[] {
@@ -169,18 +173,22 @@ export function createStaffNavigation({
     overview,
     ...futureNavItems.map((id) => {
       const permission = permissionByNavItem[id];
+      const href = implementedNavItems[id];
       const status =
-        permission === undefined
-          ? "disabled"
-          : accessStatus(
-              evaluateAccess(
-                accessFacts,
-                accessRequirement(context, permission),
-              ),
-            );
+        href !== undefined
+          ? "allowed"
+          : permission === undefined
+            ? "disabled"
+            : accessStatus(
+                evaluateAccess(
+                  accessFacts,
+                  accessRequirement(context, permission),
+                ),
+              );
 
       return {
         description: labels[id].description,
+        href,
         id,
         permission,
         status,
