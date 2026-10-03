@@ -98,7 +98,7 @@ export const messages = {
         },
         relationships: {
           title: "العلاقات",
-          description: "سيتم تنفيذ علاقات المتدربين لاحقًا",
+          description: "إدارة علاقات المتدربين وتعيينات الطاقم",
         },
         training: {
           title: "التدريب",
@@ -262,6 +262,66 @@ export const messages = {
         created: "تم تسجيل الدفعة.",
       },
     },
+    relationships: {
+      title: "علاقات المتدربين",
+      loading: "جارٍ تحميل العلاقات...",
+      noWorkspace: {
+        title: "لا توجد مساحة محددة",
+        copy: "اختر مساحة طاقم مؤهلة قبل عرض علاقات المتدربين.",
+      },
+      empty: "لا توجد علاقات تطابق هذا المرشح.",
+      relationshipIdWarning:
+        "يجب أن يبقى معرف العلاقة مختلفًا عن معرف مستخدم المتدرب.",
+      detail: {
+        title: "تفاصيل العلاقة",
+        relationshipId: "معرف العلاقة",
+        traineeUserId: "معرف مستخدم المتدرب",
+        traineeMembershipId: "معرف عضوية المتدرب",
+        homeBranch: "الفرع الأساسي",
+        proposedPrimary: "المدرب الأساسي المقترح",
+        currentPrimary: "تعيين المدرب الأساسي الحالي",
+        version: "الإصدار",
+        engagement: "فترات الارتباط",
+      },
+      assignments: {
+        title: "التعيينات",
+        helper:
+          "تستخدم أوامر التعيين معرف العلاقة وإصدار الخادم المتوقع. معرفات عضوية الطاقم ليست معرفات مستخدمي المتدربين.",
+      },
+      confirm: {
+        removeAssistant: "هل تريد إزالة تعيين المدرب المساعد؟",
+        removeNutritionist: "هل تريد إزالة تعيين أخصائي التغذية؟",
+        removePrimary: "هل تريد إزالة تعيين المدرب الأساسي؟",
+      },
+      fields: {
+        branch: "الفرع الأساسي",
+        expectedVersion: "الإصدار المتوقع",
+        reason: "السبب",
+        staffMember: "عضوية الطاقم",
+        status: "الحالة",
+      },
+      actions: {
+        addAssistant: "إضافة مساعد",
+        addNutritionist: "إضافة أخصائي تغذية",
+        changeBranch: "تغيير الفرع",
+        removeAssistant: "إزالة المساعد",
+        removeNutritionist: "إزالة أخصائي التغذية",
+        removePrimary: "إزالة المدرب الأساسي",
+        setPrimary: "تعيين المدرب الأساسي",
+      },
+      errors: {
+        accessUnavailable: "معلومات الصلاحيات غير كافية لتفعيل هذا الإجراء.",
+        conflict: "تغيرت العلاقة على الخادم. حدّث الصفحة قبل إعادة المحاولة.",
+        denied: "رفض الخادم إجراء العلاقة لصلاحيات الحساب الحالية.",
+        malformed:
+          "عاد الخادم ببيانات علاقة غير متوقعة، لذلك توقفت الواجهة بأمان.",
+        unavailable: "تعذر تحميل بيانات العلاقات. حاول مرة أخرى.",
+        validation: "راجع حقول العلاقة المطلوبة ثم حاول مرة أخرى.",
+      },
+      status: {
+        saved: "تم حفظ تغيير العلاقة.",
+      },
+    },
   },
   en: {
     metadata: {
@@ -361,7 +421,7 @@ export const messages = {
         },
         relationships: {
           title: "Relationships",
-          description: "Trainee relationships arrive in a later issue",
+          description: "Trainee relationship and assignment workflows",
         },
         training: {
           title: "Training",
@@ -524,6 +584,68 @@ export const messages = {
       },
       status: {
         created: "Payment recorded.",
+      },
+    },
+    relationships: {
+      title: "Trainee relationships",
+      loading: "Loading relationships...",
+      noWorkspace: {
+        title: "No workspace selected",
+        copy: "Select an eligible staff workspace before viewing trainee relationships.",
+      },
+      empty: "No relationships match this filter.",
+      relationshipIdWarning:
+        "The relationship id must stay distinct from the trainee user id.",
+      detail: {
+        title: "Relationship detail",
+        relationshipId: "Relationship ID",
+        traineeUserId: "Trainee user ID",
+        traineeMembershipId: "Trainee membership ID",
+        homeBranch: "Home branch",
+        proposedPrimary: "Proposed primary trainer",
+        currentPrimary: "Current primary assignment",
+        version: "Version",
+        engagement: "Engagement periods",
+      },
+      assignments: {
+        title: "Assignments",
+        helper:
+          "Assignment controls use relationshipId and Backend expectedVersion. Staff membership ids are not trainee user ids.",
+      },
+      confirm: {
+        removeAssistant: "Remove assistant trainer assignment?",
+        removeNutritionist: "Remove nutritionist assignment?",
+        removePrimary: "Remove primary trainer assignment?",
+      },
+      fields: {
+        branch: "Home branch",
+        expectedVersion: "Expected version",
+        reason: "Reason",
+        staffMember: "Staff membership",
+        status: "Status",
+      },
+      actions: {
+        addAssistant: "Add assistant",
+        addNutritionist: "Add nutritionist",
+        changeBranch: "Change branch",
+        removeAssistant: "Remove assistant",
+        removeNutritionist: "Remove nutritionist",
+        removePrimary: "Remove primary",
+        setPrimary: "Set primary",
+      },
+      errors: {
+        accessUnavailable: "Access facts are unavailable for this action.",
+        conflict:
+          "The relationship changed on the server. Refresh before retrying.",
+        denied:
+          "The Backend rejected this relationship action for the current access.",
+        malformed:
+          "The Backend returned unexpected relationship data, so the UI failed closed.",
+        unavailable: "Relationship data could not be loaded. Try again.",
+        validation: "Review the required relationship fields and try again.",
+      },
+      status: {
+        saved: "Relationship change saved.",
       },
     },
   },
