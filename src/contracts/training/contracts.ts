@@ -195,12 +195,21 @@ export interface ExerciseDto {
 export interface CreateTrainingProgramRequestDto {
   name: string;
   source: { type: "SCRATCH" };
-  days: TrainingProgramDayDto[];
+  days: TrainingProgramDayRequestDto[];
 }
 
 export interface CreateTrainingRevisionRequestDto extends ExpectedVersionRequestDto {
-  days: TrainingProgramDayDto[];
+  days: TrainingProgramDayRequestDto[];
 }
+
+export type TrainingPrescriptionRequestDto = Omit<
+  TrainingPrescriptionDto,
+  "exerciseNameSnapshot"
+>;
+export type TrainingProgramDayRequestDto = Omit<
+  TrainingProgramDayDto,
+  "exercises"
+> & { exercises: TrainingPrescriptionRequestDto[] };
 
 export interface WorkoutPatchRequestDto extends ExpectedVersionRequestDto {
   exercises: { workoutExerciseKey: string; sets: WorkoutActualSetDto[] }[];

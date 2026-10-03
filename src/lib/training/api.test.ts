@@ -64,7 +64,15 @@ describe("training API", () => {
       { data: { workout: workout({ status: "COMPLETED" }) } },
     ]);
     await listTrainingExercises(api, workspaceId);
-    const days = [...revision().days];
+    const days = revision().days.map((day) => ({
+      ...day,
+      exercises: day.exercises.map((exercise) => ({
+        exerciseId: exercise.exerciseId,
+        order: exercise.order,
+        setStructure: exercise.setStructure,
+        targetSets: exercise.targetSets,
+      })),
+    }));
     const createBody = {
       name: "Strength Block",
       source: { type: "SCRATCH" as const },
