@@ -2,7 +2,13 @@
  * @vitest-environment jsdom
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   MembershipId,
@@ -420,11 +426,14 @@ describe("training experience UI", () => {
     );
     rerender(trainingTree(queryClient));
     await screen.findByText("In progress · workout_workspace_b");
-    pending.resolve({
-      data: {
-        program: program({ name: "Old A detail" }),
-        revision: revision(),
-      },
+    await act(async () => {
+      pending.resolve({
+        data: {
+          program: program({ name: "Old A detail" }),
+          revision: revision(),
+        },
+      });
+      await pending.promise;
     });
     expect(screen.queryByText("Old A detail")).not.toBeInTheDocument();
     expect(screen.queryByText("Summit Gym")).not.toBeInTheDocument();
@@ -497,7 +506,10 @@ describe("training experience UI", () => {
     rerender(trainingTree(queryClient));
 
     expect(await screen.findByText("Pulse Gym")).toBeInTheDocument();
-    pending.resolve({ data: { program: program({ status: "ACTIVE" }) } });
+    await act(async () => {
+      pending.resolve({ data: { program: program({ status: "ACTIVE" }) } });
+      await pending.promise;
+    });
 
     await waitFor(() =>
       expect(
@@ -575,7 +587,10 @@ describe("training experience UI", () => {
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(trainingCommandCalls()).toHaveLength(1));
-    pending.resolve({ data: { program: program() } });
+    await act(async () => {
+      pending.resolve({ data: { program: program() } });
+      await pending.promise;
+    });
     await screen.findByText("Training change saved.");
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
