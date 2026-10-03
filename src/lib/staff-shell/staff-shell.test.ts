@@ -104,6 +104,32 @@ describe("staff shell model", () => {
     });
   });
 
+  test("commercial route metadata uses billing access, not platform lead access", () => {
+    const workspace = selectStaffWorkspaces([
+      myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),
+    ])[0];
+    const context = createStaffShellContext({
+      branchLabel: "All branches",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const nav = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [decision("leads.read", true, "ALLOW")],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    });
+
+    expect(nav.find((item) => item.id === "leads")).toMatchObject({
+      href: "/app/leads",
+      permission: "billing.subscription.read",
+    });
+  });
+
   test("same access facts produce identical protected navigation for different staff roles", () => {
     const trainer = selectStaffWorkspaces([
       myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),

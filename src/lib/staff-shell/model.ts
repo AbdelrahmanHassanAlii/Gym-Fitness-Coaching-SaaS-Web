@@ -86,7 +86,7 @@ const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
   {
     analytics: "dashboard.gym.read",
     documents: "documents.read",
-    leads: "leads.read",
+    leads: "billing.subscription.read",
     nutrition: "nutrition.plans.read",
     progress: "measurements.read",
     relationships: "trainees.read",

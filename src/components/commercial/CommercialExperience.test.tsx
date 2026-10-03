@@ -44,7 +44,7 @@ const mocks = vi.hoisted(() => ({
     subscribe: vi.fn(),
     verifyMfaLogin: vi.fn(),
   },
-  idempotencyKey: "payment-key-1",
+  createIdempotencyKey: vi.fn(),
   staffContext: {
     accessFacts: null,
     shellContext: {
@@ -91,7 +91,7 @@ vi.mock("@/lib/api", async () => {
 
   return {
     ...actual,
-    createIdempotencyKey: () => mocks.idempotencyKey,
+    createIdempotencyKey: mocks.createIdempotencyKey,
   };
 });
 
@@ -106,7 +106,8 @@ describe("commercial experience UI", () => {
       status: "authenticated",
       user: user("Amina", "Owner"),
     } as AuthState;
-    mocks.idempotencyKey = "payment-key-1";
+    mocks.createIdempotencyKey.mockReset();
+    mocks.createIdempotencyKey.mockReturnValue("payment-key-1");
     mocks.staffContext = context("workspace_a", "Summit Gym", 1);
   });
 
@@ -128,6 +129,9 @@ describe("commercial experience UI", () => {
 
     renderCommercial();
 
+    expect(
+      await screen.findByRole("heading", { name: "Commercial" }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("TRIAL")).toBeInTheDocument();
     expect(screen.getByText("WITHIN_LIMIT")).toBeInTheDocument();
     expect(screen.getByText("2500 EGP")).toBeInTheDocument();
@@ -143,7 +147,7 @@ describe("commercial experience UI", () => {
 
     await screen.findByLabelText("Amount");
     fireEvent.change(screen.getByLabelText("Amount"), {
-      target: { value: "3000" },
+      target: { value: "3000.75" },
     });
     fireEvent.change(screen.getByLabelText("Currency"), {
       target: { value: "egp" },
@@ -157,7 +161,7 @@ describe("commercial experience UI", () => {
       expect(mocks.authSession.apiClient.request).toHaveBeenCalledWith(
         expect.objectContaining({
           body: {
-            amount: 3000,
+            amount: 3000.75,
             currency: "EGP",
             paymentMethod: "cash",
           },
@@ -167,6 +171,29 @@ describe("commercial experience UI", () => {
         }),
       ),
     );
+  });
+
+  test("invalid amount does not dispatch payment command", async () => {
+    mockCommercialData();
+
+    renderCommercial();
+
+    await screen.findByLabelText("Amount");
+    fireEvent.change(screen.getByLabelText("Amount"), {
+      target: { value: "0" },
+    });
+    fireEvent.change(screen.getByLabelText("Payment method"), {
+      target: { value: "cash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(
+      mocks.authSession.apiClient.request.mock.calls.some(
+        ([request]) =>
+          request.method === "POST" &&
+          request.path === "/workspaces/workspace_a/payments",
+      ),
+    ).toBe(false);
   });
 
   test("missing access facts fail closed and do not submit payment command", async () => {
@@ -234,6 +261,88 @@ describe("commercial experience UI", () => {
     );
 
     pending.resolve(envelope({ payment: payment("workspace_a") }));
+  });
+
+  test("ambiguous retry of the same logical payment keeps the same idempotency key", async () => {
+    let attempts = 0;
+    mocks.createIdempotencyKey.mockReturnValueOnce("stable-payment-key");
+    mockCommercialData({
+      afterInitial: (request) => {
+        if (request.path === "/workspaces/workspace_a/payments") {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new ApiError({
+              category: "unknown",
+              kind: "network",
+              message: "network failure after send",
+            });
+          }
+
+          return envelope({ payment: payment("workspace_a") });
+        }
+
+        return envelope([]);
+      },
+    });
+
+    renderCommercial();
+
+    await screen.findByLabelText("Amount");
+    fireEvent.change(screen.getByLabelText("Amount"), {
+      target: { value: "3000" },
+    });
+    fireEvent.change(screen.getByLabelText("Payment method"), {
+      target: { value: "cash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(
+      await screen.findByText(
+        "Commercial state could not be loaded. Try again.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+
+    await waitFor(() =>
+      expect(
+        paymentPostCalls().map(([request]) => request.idempotencyKey),
+      ).toEqual(["stable-payment-key", "stable-payment-key"]),
+    );
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(1);
+  });
+
+  test("a genuinely new payment command receives a new idempotency key", async () => {
+    mocks.createIdempotencyKey
+      .mockReturnValueOnce("payment-key-1")
+      .mockReturnValueOnce("payment-key-2");
+    mockCommercialData();
+
+    renderCommercial();
+
+    await screen.findByLabelText("Amount");
+    fireEvent.change(screen.getByLabelText("Amount"), {
+      target: { value: "3000" },
+    });
+    fireEvent.change(screen.getByLabelText("Payment method"), {
+      target: { value: "cash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+    expect(await screen.findByText("Payment recorded.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Amount"), {
+      target: { value: "4500" },
+    });
+    fireEvent.change(screen.getByLabelText("Payment method"), {
+      target: { value: "bank-transfer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+
+    await waitFor(() =>
+      expect(
+        paymentPostCalls().map(([request]) => request.idempotencyKey),
+      ).toEqual(["payment-key-1", "payment-key-2"]),
+    );
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(2);
   });
 
   test("Backend 403 is access denied UX and does not logout", async () => {
@@ -312,10 +421,36 @@ describe("commercial experience UI", () => {
     );
     expect(screen.getByText("ACTIVE")).toBeInTheDocument();
   });
+
+  test("Arabic RTL commercial page renders truthful labels", async () => {
+    mockCommercialData();
+
+    render(
+      <div dir="rtl">
+        <QueryClientProvider client={createTestQueryClient()}>
+          <CommercialExperience labels={messages.ar.commercial} />
+        </QueryClientProvider>
+      </div>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "التجاري" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("المبلغ")).toBeInTheDocument();
+    expect(screen.getByText("مسارات العملاء المحتملين")).toBeInTheDocument();
+  });
 });
 
 function renderCommercial() {
   return render(commercialTree());
+}
+
+function paymentPostCalls() {
+  return mocks.authSession.apiClient.request.mock.calls.filter(
+    ([request]) =>
+      request.method === "POST" &&
+      request.path === "/workspaces/workspace_a/payments",
+  );
 }
 
 function commercialTree(queryClient = createTestQueryClient()) {

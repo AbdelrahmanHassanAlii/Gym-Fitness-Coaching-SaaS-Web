@@ -99,6 +99,15 @@ const emptyPaymentForm: PaymentFormValues = {
 };
 
 const commandLocksByOwner = new Map<string, Set<string>>();
+const paymentIdempotencyByOwner = new Map<
+  string,
+  { fingerprint: string; key: string }
+>();
+
+type PaymentMutationVariables = {
+  body: CreateManualPaymentRequestDto;
+  idempotencyKey: string;
+};
 
 export function CommercialExperience({ labels }: { labels: CommercialLabels }) {
   const queryClient = useQueryClient();
@@ -118,6 +127,7 @@ export function CommercialExperience({ labels }: { labels: CommercialLabels }) {
   useEffect(() => {
     return () => {
       commandLocksByOwner.delete(commandLockOwner);
+      paymentIdempotencyByOwner.delete(commandLockOwner);
     };
   }, [commandLockOwner]);
 
@@ -157,18 +167,14 @@ export function CommercialExperience({ labels }: { labels: CommercialLabels }) {
   });
 
   const paymentMutation = useMutation({
-    mutationFn: (body: CreateManualPaymentRequestDto) =>
-      createManualPayment(
-        apiClient,
-        workspaceId!,
-        body,
-        createIdempotencyKey(),
-      ),
+    mutationFn: ({ body, idempotencyKey }: PaymentMutationVariables) =>
+      createManualPayment(apiClient, workspaceId!, body, idempotencyKey),
     onError: (caught) => {
       setStatusMessage(null);
       setError(errorMessage(caught, labels));
     },
     onSuccess: async () => {
+      paymentIdempotencyByOwner.delete(commandLockOwner);
       paymentForm.reset(emptyPaymentForm);
       setError(null);
       setStatusMessage(labels.status.created);
@@ -346,14 +352,30 @@ export function CommercialExperience({ labels }: { labels: CommercialLabels }) {
               return;
             }
 
+            const body = paymentBody(values);
+            if (body === null) {
+              setStatusMessage(null);
+              setError(labels.errors.validation);
+              return;
+            }
+
             void runOnce("payment:create", () =>
-              paymentMutation.mutateAsync(paymentBody(values)),
+              paymentMutation.mutateAsync({
+                body,
+                idempotencyKey: idempotencyKeyForPayment(
+                  body,
+                  commandLockOwner,
+                ),
+              }),
             );
           })}
         >
           <TextField
             label={labels.fields.amount}
-            registration={paymentForm.register("amount", { required: true })}
+            registration={paymentForm.register("amount", {
+              required: true,
+              validate: (value) => Number(value) > 0,
+            })}
             type="number"
           />
           <TextField
@@ -463,20 +485,53 @@ function TextField({
   return (
     <label>
       <span>{label}</span>
-      <input type={type} {...registration} />
+      <input
+        step={type === "number" ? "any" : undefined}
+        type={type}
+        {...registration}
+      />
     </label>
   );
 }
 
-function paymentBody(values: PaymentFormValues): CreateManualPaymentRequestDto {
+function paymentBody(
+  values: PaymentFormValues,
+): CreateManualPaymentRequestDto | null {
+  const amount = Number(values.amount);
+  const paidAtDate = values.paidAt === "" ? null : new Date(values.paidAt);
+  if (
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    values.currency.length !== 3 ||
+    !values.paymentMethod.trim() ||
+    (paidAtDate !== null && Number.isNaN(paidAtDate.getTime()))
+  ) {
+    return null;
+  }
+
   return cleanObject({
-    amount: Number(values.amount),
+    amount,
     currency: values.currency.toUpperCase(),
     notes: values.notes,
-    paidAt: values.paidAt === "" ? "" : new Date(values.paidAt).toISOString(),
+    paidAt: paidAtDate?.toISOString() ?? "",
     paymentMethod: values.paymentMethod,
     paymentReference: values.paymentReference,
   });
+}
+
+function idempotencyKeyForPayment(
+  body: CreateManualPaymentRequestDto,
+  owner: string,
+): string {
+  const fingerprint = JSON.stringify(body);
+  const existing = paymentIdempotencyByOwner.get(owner);
+  if (existing?.fingerprint === fingerprint) {
+    return existing.key;
+  }
+
+  const key = createIdempotencyKey();
+  paymentIdempotencyByOwner.set(owner, { fingerprint, key });
+  return key;
 }
 
 function cleanObject<T extends Record<string, unknown>>(value: T): T {

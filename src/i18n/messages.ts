@@ -209,7 +209,7 @@ export const messages = {
       },
     },
     commercial: {
-      title: "العملاء المحتملون والتجاري",
+      title: "التجاري",
       loading: "جارٍ تحميل الحالة التجارية...",
       noWorkspace: {
         title: "لا توجد مساحة محددة",
@@ -230,7 +230,7 @@ export const messages = {
         storage: "التخزين المستخدم / الحد",
       },
       payments: {
-        title: "المدفوعات اليدوية",
+        title: "المدفوعات اليدوية الأخيرة",
         empty: "لا توجد مدفوعات مسجلة لهذه المساحة.",
       },
       deferred: {
@@ -473,7 +473,7 @@ export const messages = {
       },
     },
     commercial: {
-      title: "Leads and commercial",
+      title: "Commercial",
       loading: "Loading commercial state...",
       noWorkspace: {
         title: "No workspace selected",
@@ -494,7 +494,7 @@ export const messages = {
         storage: "Storage used / limit",
       },
       payments: {
-        title: "Manual payments",
+        title: "Recent manual payments",
         empty: "No payments have been recorded for this workspace.",
       },
       deferred: {
