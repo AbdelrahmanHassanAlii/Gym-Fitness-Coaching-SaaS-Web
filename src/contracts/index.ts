@@ -11,4 +11,5 @@ export * from "./notifications/contracts";
 export * from "./permissions/contracts";
 export * from "./relationships/contracts";
 export * from "./support/contracts";
+export * from "./training/contracts";
 export * from "./workspaces/contracts";

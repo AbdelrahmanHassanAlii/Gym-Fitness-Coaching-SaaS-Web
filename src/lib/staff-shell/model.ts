@@ -98,6 +98,7 @@ const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
 const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
   leads: "/app/leads",
   relationships: "/app/relationships",
+  training: "/app/training",
   workspace: "/app/workspace",
 };
 
