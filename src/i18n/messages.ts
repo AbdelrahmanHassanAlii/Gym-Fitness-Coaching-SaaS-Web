@@ -289,9 +289,10 @@ export const messages = {
           "تستخدم أوامر التعيين معرف العلاقة وإصدار الخادم المتوقع. معرفات عضوية الطاقم ليست معرفات مستخدمي المتدربين.",
       },
       confirm: {
-        removeAssistant: "هل تريد إزالة تعيين المدرب المساعد؟",
-        removeNutritionist: "هل تريد إزالة تعيين أخصائي التغذية؟",
-        removePrimary: "هل تريد إزالة تعيين المدرب الأساسي؟",
+        changeBranch: "هل تريد تغيير الفرع الأساسي إلى {target}؟",
+        removeAssistant: "هل تريد إزالة تعيين المدرب المساعد {target}؟",
+        removeNutritionist: "هل تريد إزالة تعيين أخصائي التغذية {target}؟",
+        removePrimary: "هل تريد إزالة تعيين المدرب الأساسي {target}؟",
       },
       fields: {
         branch: "الفرع الأساسي",
@@ -613,9 +614,10 @@ export const messages = {
           "Assignment controls use relationshipId and Backend expectedVersion. Staff membership ids are not trainee user ids.",
       },
       confirm: {
-        removeAssistant: "Remove assistant trainer assignment?",
-        removeNutritionist: "Remove nutritionist assignment?",
-        removePrimary: "Remove primary trainer assignment?",
+        changeBranch: "Change home branch to {target}?",
+        removeAssistant: "Remove assistant trainer assignment for {target}?",
+        removeNutritionist: "Remove nutritionist assignment for {target}?",
+        removePrimary: "Remove primary trainer assignment {target}?",
       },
       fields: {
         branch: "Home branch",

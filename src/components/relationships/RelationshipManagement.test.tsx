@@ -164,6 +164,33 @@ describe("relationship management UI", () => {
     expect(relationshipCommandCalls()).toHaveLength(0);
   });
 
+  test("relationship-specific facts alone do not authorize workspace-scoped assignment route guards", async () => {
+    mockRelationshipData();
+    mocks.staffContext = {
+      ...context("workspace_a", "Summit Gym", 1),
+      accessFacts: accessFactsFromDecision({
+        decisions: [
+          allowSpecificRelationship(
+            "trainees.assignments.primary.manage",
+            "relationship_workspace_a",
+          ),
+        ],
+        membershipId: "membership_workspace_a" as MembershipId,
+        sessionGeneration: 1,
+        workspaceId: "workspace_a" as WorkspaceId,
+      }),
+    };
+
+    renderRelationships();
+
+    await screen.findByLabelText("Staff membership");
+    const button = screen.getByRole("button", { name: "Set primary" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+
+    expect(relationshipCommandCalls()).toHaveLength(0);
+  });
+
   test("set primary command uses relationshipId, exact body, and idempotency key", async () => {
     mockRelationshipData();
 
@@ -264,6 +291,57 @@ describe("relationship management UI", () => {
     expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(1);
   });
 
+  test("relationship list filter changes do not rotate a retry idempotency key", async () => {
+    let attempts = 0;
+    mocks.createIdempotencyKey.mockReturnValueOnce("filter-stable-key");
+    mockRelationshipData({
+      afterInitial: (request) => {
+        if (request.method === "PUT") {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new ApiError({
+              category: "unknown",
+              kind: "network",
+              message: "ambiguous send",
+            });
+          }
+        }
+
+        return envelope({ relationship: relationship("workspace_a") });
+      },
+    });
+
+    renderRelationships();
+
+    await screen.findByLabelText("Staff membership");
+    fireEvent.change(screen.getByLabelText("Staff membership"), {
+      target: { value: "membership_workspace_a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set primary" }));
+
+    expect(
+      await screen.findByText(
+        "Relationship data could not be loaded. Try again.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "ACTIVE" },
+    });
+    await screen.findByLabelText("Staff membership");
+    fireEvent.change(screen.getByLabelText("Staff membership"), {
+      target: { value: "membership_workspace_a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set primary" }));
+
+    await waitFor(() =>
+      expect(
+        relationshipCommandCalls().map(([request]) => request.idempotencyKey),
+      ).toEqual(["filter-stable-key", "filter-stable-key"]),
+    );
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(1);
+  });
+
   test("remove assignment commands require confirmation and use Backend terminology", async () => {
     mockRelationshipData();
 
@@ -277,7 +355,7 @@ describe("relationship management UI", () => {
 
     await waitFor(() =>
       expect(globalThis.confirm).toHaveBeenCalledWith(
-        "Remove assistant trainer assignment?",
+        "Remove assistant trainer assignment for membership_workspace_a?",
       ),
     );
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledWith(
@@ -320,6 +398,71 @@ describe("relationship management UI", () => {
       ),
     ).toBeInTheDocument();
     expect(mocks.authSession.logout).not.toHaveBeenCalled();
+  });
+
+  test("Backend 409 conflict is surfaced without overwrite", async () => {
+    mockRelationshipData({
+      afterInitial: (request) => {
+        if (request.method === "PUT") {
+          throw new ApiError({
+            category: "expected-version-conflict",
+            code: "COACHING_RELATIONSHIP_VERSION_CONFLICT",
+            kind: "backend",
+            message: "Version conflict",
+            status: 409,
+          });
+        }
+
+        return envelope({ relationship: relationship("workspace_a") });
+      },
+    });
+
+    renderRelationships();
+
+    await screen.findByLabelText("Staff membership");
+    fireEvent.change(screen.getByLabelText("Staff membership"), {
+      target: { value: "membership_workspace_a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set primary" }));
+
+    expect(
+      await screen.findByText(
+        "The relationship changed on the server. Refresh before retrying.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("Backend 422 validation is safe business feedback", async () => {
+    mockRelationshipData({
+      afterInitial: (request) => {
+        if (request.method === "PUT") {
+          throw new ApiError({
+            category: "validation",
+            code: "WORKSPACE_MEMBERSHIP_NOT_FOUND",
+            kind: "backend",
+            message: "Unsafe backend detail",
+            status: 422,
+          });
+        }
+
+        return envelope({ relationship: relationship("workspace_a") });
+      },
+    });
+
+    renderRelationships();
+
+    await screen.findByLabelText("Staff membership");
+    fireEvent.change(screen.getByLabelText("Staff membership"), {
+      target: { value: "membership_workspace_a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set primary" }));
+
+    expect(
+      await screen.findByText(
+        "Review the required relationship fields and try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Unsafe backend detail")).not.toBeInTheDocument();
   });
 
   test("malformed relationship response fails closed", async () => {
@@ -387,6 +530,63 @@ describe("relationship management UI", () => {
     expect(screen.getAllByText("relationship_workspace_b").length).toBe(2);
   });
 
+  test("workspace A mutation completion cannot publish success state under workspace B", async () => {
+    const pending = deferred<unknown>();
+    mockRelationshipData({
+      afterInitial: (request) => {
+        if (request.method === "PUT") {
+          return pending.promise;
+        }
+
+        return envelope({ relationship: relationship("workspace_a") });
+      },
+    });
+    const queryClient = createTestQueryClient();
+    const { rerender } = render(relationshipsTree(queryClient));
+
+    await screen.findByLabelText("Staff membership");
+    fireEvent.change(screen.getByLabelText("Staff membership"), {
+      target: { value: "membership_workspace_a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set primary" }));
+
+    mocks.authSession.generation = 2;
+    mocks.staffContext = context("workspace_b", "Pulse Gym", 2);
+    mocks.authSession.apiClient.request.mockImplementation(async (request) => {
+      if (request.path === "/workspaces/workspace_b/relationships") {
+        return envelope([relationship("workspace_b")]);
+      }
+
+      if (
+        request.path ===
+        "/workspaces/workspace_b/relationships/relationship_workspace_b"
+      ) {
+        return envelope({ relationship: relationship("workspace_b") });
+      }
+
+      if (request.path === "/workspaces/workspace_b/branches") {
+        return envelope([branch("workspace_b")]);
+      }
+
+      if (request.path === "/workspaces/workspace_b/memberships") {
+        return envelope([membership("workspace_b")]);
+      }
+
+      return envelope([]);
+    });
+    rerender(relationshipsTree(queryClient));
+    expect(await screen.findByText("Pulse Gym")).toBeInTheDocument();
+
+    pending.resolve(envelope({ relationship: relationship("workspace_a") }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Relationship change saved."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("relationship_workspace_b").length).toBe(2);
+  });
+
   test("Arabic RTL relationship page renders actual management controls", async () => {
     mockRelationshipData();
 
@@ -436,7 +636,7 @@ function mockRelationshipData(input?: {
       return input.afterInitial(request);
     }
 
-    if (request.path === "/workspaces/workspace_a/relationships") {
+    if (isRelationshipListPath(request.path, "workspace_a")) {
       return envelope([relationship("workspace_a")]);
     }
 
@@ -463,6 +663,11 @@ function mockRelationshipData(input?: {
 
 function envelope<T>(data: T): { data: T } {
   return { data };
+}
+
+function isRelationshipListPath(path: string, workspaceId: string): boolean {
+  const basePath = `/workspaces/${workspaceId}/relationships`;
+  return path === basePath || path.startsWith(`${basePath}?`);
 }
 
 function relationship(workspaceId: string): CoachingRelationshipDto {
@@ -547,7 +752,7 @@ function accessFacts(workspaceId: string, generation: number) {
 
   return accessFactsFromDecision({
     decisions: relationshipPermissionKeys.map((permission) =>
-      allow(permission, `relationship_${workspaceId}`),
+      allowWorkspace(permission),
     ),
     membershipId: `membership_${workspaceId}` as MembershipId,
     sessionGeneration: generation,
@@ -555,7 +760,21 @@ function accessFacts(workspaceId: string, generation: number) {
   });
 }
 
-function allow(
+function allowWorkspace(
+  permission: PermissionDecisionDto["permission"],
+): PermissionDecisionDto {
+  return {
+    allowed: true,
+    effect: "ALLOW",
+    permission,
+    scope: {
+      type: "WORKSPACE",
+    },
+    source: "PROFILE",
+  };
+}
+
+function allowSpecificRelationship(
   permission: PermissionDecisionDto["permission"],
   relationshipId: string,
 ): PermissionDecisionDto {

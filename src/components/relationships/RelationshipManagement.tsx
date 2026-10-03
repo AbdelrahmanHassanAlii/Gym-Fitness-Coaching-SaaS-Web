@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
+import type { AuthorizationCacheContext } from "@/lib/server-state";
 import type {
   BranchId,
   CoachingRelationshipDto,
@@ -54,6 +55,7 @@ type RelationshipLabels = {
     title: string;
   };
   confirm: {
+    changeBranch: string;
     removeAssistant: string;
     removeNutritionist: string;
     removePrimary: string;
@@ -149,6 +151,15 @@ export function RelationshipManagement({
   const workspaceId = selectedWorkspace?.workspaceId ?? null;
   const accessContext = shellContext?.accessContext ?? "user";
   const canQuery = state.status === "authenticated" && workspaceId !== null;
+  const currentContextRef = useRef({
+    accessContext,
+    generation,
+    workspaceId,
+  });
+
+  useEffect(() => {
+    currentContextRef.current = { accessContext, generation, workspaceId };
+  }, [accessContext, generation, workspaceId]);
 
   useEffect(() => {
     return () => {
@@ -241,7 +252,6 @@ export function RelationshipManagement({
       accessFacts,
       generation,
       permission: "trainees.assignments.assistant.manage",
-      relationshipId: selectedRelationshipId,
       workspaceId,
     }),
     homeBranch: actionDecision({
@@ -249,7 +259,6 @@ export function RelationshipManagement({
       accessFacts,
       generation,
       permission: "trainees.update",
-      relationshipId: selectedRelationshipId,
       workspaceId,
     }),
     nutritionist: actionDecision({
@@ -257,7 +266,6 @@ export function RelationshipManagement({
       accessFacts,
       generation,
       permission: "trainees.assignments.nutritionist.manage",
-      relationshipId: selectedRelationshipId,
       workspaceId,
     }),
     primary: actionDecision({
@@ -265,54 +273,62 @@ export function RelationshipManagement({
       accessFacts,
       generation,
       permission: "trainees.assignments.primary.manage",
-      relationshipId: selectedRelationshipId,
       workspaceId,
     }),
   };
 
-  const invalidateRelationships = async (id: RelationshipId | null) => {
-    if (workspaceId === null) {
-      return;
-    }
-
+  const invalidateRelationships = async (input: {
+    accessContext: AuthorizationCacheContext;
+    generation: number;
+    relationshipId: RelationshipId;
+    statusFilter: RelationshipStatus | "ALL";
+    workspaceId: WorkspaceId;
+  }) => {
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: relationshipKeys.list(
-          workspaceId,
-          generation,
-          statusFilter,
-          accessContext,
+          input.workspaceId,
+          input.generation,
+          input.statusFilter,
+          input.accessContext,
         ),
       }),
-      id === null
-        ? Promise.resolve()
-        : queryClient.invalidateQueries({
-            queryKey: relationshipKeys.detail(
-              workspaceId,
-              id,
-              generation,
-              accessContext,
-            ),
-          }),
+      queryClient.invalidateQueries({
+        queryKey: relationshipKeys.detail(
+          input.workspaceId,
+          input.relationshipId,
+          input.generation,
+          input.accessContext,
+        ),
+      }),
     ]);
   };
 
   const commandMutation = useMutation({
     mutationFn: async (input: {
       action: RelationshipCommandAction;
+      accessContext: AuthorizationCacheContext;
+      generation: number;
       relationshipId: RelationshipId;
+      statusFilter: RelationshipStatus | "ALL";
       values: RelationshipFormValues;
+      workspaceId: WorkspaceId;
     }) => {
       const body = commandBody(input.values);
-      if (body === null || workspaceId === null) {
+      if (body === null) {
         throw validationError();
       }
-      const idempotencyKey = idempotencyKeyForCommand(commandOwner, input);
+      const idempotencyKey = idempotencyKeyForCommand(commandOwner, {
+        action: input.action,
+        relationshipId: input.relationshipId,
+        values: input.values,
+        workspaceId: input.workspaceId,
+      });
       if (input.action === "branch") {
         if (!input.values.branchId) throw validationError();
         return await changeRelationshipHomeBranch(
           apiClient,
-          workspaceId,
+          input.workspaceId,
           input.relationshipId,
           {
             expectedVersion: body.expectedVersion,
@@ -331,7 +347,7 @@ export function RelationshipManagement({
         if (!input.values.staffMembershipId) throw validationError();
         return await setPrimaryTrainer(
           apiClient,
-          workspaceId,
+          input.workspaceId,
           input.relationshipId,
           {
             expectedVersion: body.expectedVersion,
@@ -345,7 +361,7 @@ export function RelationshipManagement({
       if (input.action === "remove-primary") {
         return await removePrimaryTrainer(
           apiClient,
-          workspaceId,
+          input.workspaceId,
           input.relationshipId,
           body,
           idempotencyKey,
@@ -358,7 +374,7 @@ export function RelationshipManagement({
         if (!input.values.staffMembershipId) throw validationError();
         return await addRelationshipStaffAssignment(
           apiClient,
-          workspaceId,
+          input.workspaceId,
           input.relationshipId,
           input.action === "add-assistant" ? "assistants" : "nutritionists",
           {
@@ -372,7 +388,7 @@ export function RelationshipManagement({
       if (!input.values.staffMembershipId) throw validationError();
       return await removeRelationshipStaffAssignment(
         apiClient,
-        workspaceId,
+        input.workspaceId,
         input.relationshipId,
         input.action === "remove-assistant" ? "assistants" : "nutritionists",
         input.values.staffMembershipId as MembershipId,
@@ -380,15 +396,19 @@ export function RelationshipManagement({
         idempotencyKey,
       );
     },
-    onError: (caught) => {
-      setStatusMessage(null);
-      setError(errorMessage(caught, labels));
+    onError: (caught, variables) => {
+      if (isCurrentCommandContext(variables, currentContextRef.current)) {
+        setStatusMessage(null);
+        setError(errorMessage(caught, labels));
+      }
     },
     onSuccess: async (_data, variables) => {
       commandIdempotencyByOwner.delete(commandOwner);
-      setError(null);
-      setStatusMessage(labels.status.saved);
-      await invalidateRelationships(variables.relationshipId);
+      if (isCurrentCommandContext(variables, currentContextRef.current)) {
+        setError(null);
+        setStatusMessage(labels.status.saved);
+      }
+      await invalidateRelationships(variables);
     },
     retry: false,
   });
@@ -397,18 +417,26 @@ export function RelationshipManagement({
     action: RelationshipCommandAction,
     decision: AccessDecision,
   ) => {
-    if (!decision.allowed || selectedRelationshipId === null) {
-      return;
-    }
-    if (!confirmRelationshipCommand(action, labels)) {
+    if (
+      !decision.allowed ||
+      selectedRelationshipId === null ||
+      workspaceId === null
+    ) {
       return;
     }
     const values = form.getValues();
+    if (!confirmRelationshipCommand(action, labels, values, relationship)) {
+      return;
+    }
     void runOnce(commandOwner, "relationship:command", () =>
       commandMutation.mutateAsync({
         action,
+        accessContext,
+        generation,
         relationshipId: selectedRelationshipId,
+        statusFilter,
         values,
+        workspaceId,
       }),
     );
   };
@@ -708,24 +736,21 @@ function actionDecision({
   accessFacts,
   generation,
   permission,
-  relationshipId,
   workspaceId,
 }: {
   accessContext: "support" | "user";
   accessFacts: ReturnType<typeof useStaffWorkspaceContext>["accessFacts"];
   generation: number;
   permission: PermissionDecisionDto["permission"];
-  relationshipId: RelationshipId | null;
   workspaceId: WorkspaceId | null;
 }): AccessDecision {
   return evaluateAccess(accessFacts, {
     accessContext,
     context: "WORKSPACE",
     permission,
-    scope: relationshipId === null ? "workspace" : "relationship",
+    scope: "workspace",
     sessionGeneration: generation,
     workspaceId: workspaceId ?? undefined,
-    ...(relationshipId === null ? {} : { relationshipId }),
   });
 }
 
@@ -815,17 +840,53 @@ function idempotencyKeyForCommand(owner: string, input: unknown): string {
 function confirmRelationshipCommand(
   action: RelationshipCommandAction,
   labels: RelationshipLabels,
+  values: RelationshipFormValues,
+  relationship: CoachingRelationshipDto | null,
 ): boolean {
   const message =
-    action === "remove-primary"
-      ? labels.confirm.removePrimary
-      : action === "remove-assistant"
-        ? labels.confirm.removeAssistant
-        : action === "remove-nutritionist"
-          ? labels.confirm.removeNutritionist
-          : null;
+    action === "branch"
+      ? formatTarget(labels.confirm.changeBranch, values.branchId)
+      : action === "remove-primary"
+        ? formatTarget(
+            labels.confirm.removePrimary,
+            relationship?.currentPrimaryTrainerAssignmentId,
+          )
+        : action === "remove-assistant"
+          ? formatTarget(
+              labels.confirm.removeAssistant,
+              values.staffMembershipId,
+            )
+          : action === "remove-nutritionist"
+            ? formatTarget(
+                labels.confirm.removeNutritionist,
+                values.staffMembershipId,
+              )
+            : null;
 
   return message === null || globalThis.confirm(message);
+}
+
+function formatTarget(template: string, target: string | undefined): string {
+  return template.replace("{target}", target?.trim() || "-");
+}
+
+function isCurrentCommandContext(
+  command: {
+    accessContext: AuthorizationCacheContext;
+    generation: number;
+    workspaceId: WorkspaceId;
+  },
+  current: {
+    accessContext: AuthorizationCacheContext;
+    generation: number;
+    workspaceId: WorkspaceId | null;
+  },
+): boolean {
+  return (
+    command.workspaceId === current.workspaceId &&
+    command.generation === current.generation &&
+    command.accessContext === current.accessContext
+  );
 }
 
 function disabledReason(decision: AccessDecision, labels: RelationshipLabels) {

@@ -33,6 +33,8 @@ WEB-014 does not implement training, workouts, nutrition plans, progress/check-i
 
 WEB-010 access facts drive presentation. Missing, stale, denied, unavailable, or malformed access facts fail closed for relationship assignment commands. Role names do not grant access, and no role-to-permission map is introduced. Backend remains the authorization boundary for every command.
 
+Relationship assignment route guards are workspace-scoped Backend permission checks. Relationship-specific assignment and eligibility rules are revalidated by the Backend service; Web does not treat relationship-scoped facts, list membership, candidate rows, or staff role labels as command authorization.
+
 The relationship detail route has Backend SELF semantics for an active trainee’s own relationship. WEB-014 is a Gym Staff Portal surface, so it does not reinterpret SELF access as staff assignment authority.
 
 ## Identity And Cache Boundaries
