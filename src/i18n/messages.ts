@@ -93,8 +93,8 @@ export const messages = {
           description: "سيتم تنفيذ إدارة الطاقم لاحقًا",
         },
         leads: {
-          title: "العملاء المحتملون",
-          description: "سيتم تنفيذ مسار العملاء لاحقًا",
+          title: "التجاري",
+          description: "حالة الاشتراك، الاستخدام، والمدفوعات",
         },
         relationships: {
           title: "العلاقات",
@@ -208,6 +208,60 @@ export const messages = {
         sent: "تم إرسال الدعوة.",
       },
     },
+    commercial: {
+      title: "العملاء المحتملون والتجاري",
+      loading: "جارٍ تحميل الحالة التجارية...",
+      noWorkspace: {
+        title: "لا توجد مساحة محددة",
+        copy: "اختر مساحة طاقم مؤهلة قبل عرض الحالة التجارية.",
+      },
+      subscription: {
+        title: "الاشتراك",
+        lifecycle: "حالة الاشتراك",
+        accessMode: "وضع الوصول",
+        currentTerms: "الشروط الحالية",
+        noTerms: "لا توجد شروط فعالة",
+      },
+      usage: {
+        title: "الاستخدام والحدود",
+        compliance: "حالة الحدود",
+        activeTrainees: "المتدربون النشطون",
+        activeStaff: "الطاقم النشط",
+        storage: "التخزين المستخدم / الحد",
+      },
+      payments: {
+        title: "المدفوعات اليدوية",
+        empty: "لا توجد مدفوعات مسجلة لهذه المساحة.",
+      },
+      deferred: {
+        title: "مسارات العملاء المحتملين",
+        copy: "إدارة العملاء المحتملين وتحويلهم في الخادم الحالي مسار منصة بصلاحيات PLATFORM، وليست مسار طاقم جيم لمساحة العمل. لذلك لا تنشئ هذه الواجهة CRM محليًا أو قاعدة عملاء وهمية.",
+      },
+      fields: {
+        amount: "المبلغ",
+        currency: "العملة",
+        notes: "ملاحظات",
+        paidAt: "وقت الدفع",
+        paymentMethod: "طريقة الدفع",
+        paymentReference: "مرجع الدفع",
+      },
+      actions: {
+        createPayment: "تسجيل دفعة",
+      },
+      errors: {
+        accessUnavailable: "معلومات الصلاحيات غير كافية لتفعيل هذا الإجراء.",
+        conflict:
+          "تغيرت الحالة التجارية على الخادم. حدّث وراجع قبل إعادة المحاولة.",
+        denied: "رفض الخادم هذا الإجراء لصلاحيات الحساب الحالية.",
+        malformed:
+          "عاد الخادم ببيانات تجارية غير متوقعة، لذلك توقفت الواجهة بأمان.",
+        unavailable: "تعذر تحميل الحالة التجارية. حاول مرة أخرى.",
+        validation: "راجع الحقول المطلوبة ثم حاول مرة أخرى.",
+      },
+      status: {
+        created: "تم تسجيل الدفعة.",
+      },
+    },
   },
   en: {
     metadata: {
@@ -302,8 +356,8 @@ export const messages = {
           description: "Staff management arrives in a later issue",
         },
         leads: {
-          title: "Leads",
-          description: "Lead workflows arrive in a later issue",
+          title: "Commercial",
+          description: "Subscription, usage, and payments",
         },
         relationships: {
           title: "Relationships",
@@ -416,6 +470,60 @@ export const messages = {
       status: {
         saved: "Change saved.",
         sent: "Invitation sent.",
+      },
+    },
+    commercial: {
+      title: "Leads and commercial",
+      loading: "Loading commercial state...",
+      noWorkspace: {
+        title: "No workspace selected",
+        copy: "Select an eligible staff workspace before viewing commercial state.",
+      },
+      subscription: {
+        title: "Subscription",
+        lifecycle: "Lifecycle",
+        accessMode: "Access mode",
+        currentTerms: "Current terms",
+        noTerms: "No active terms",
+      },
+      usage: {
+        title: "Usage and limits",
+        compliance: "Limit status",
+        activeTrainees: "Active trainees",
+        activeStaff: "Active staff",
+        storage: "Storage used / limit",
+      },
+      payments: {
+        title: "Manual payments",
+        empty: "No payments have been recorded for this workspace.",
+      },
+      deferred: {
+        title: "Lead workflows",
+        copy: "The current Backend lead management and conversion routes are platform-scoped, not workspace staff routes. This page does not create a local CRM or frontend-only pipeline.",
+      },
+      fields: {
+        amount: "Amount",
+        currency: "Currency",
+        notes: "Notes",
+        paidAt: "Paid at",
+        paymentMethod: "Payment method",
+        paymentReference: "Payment reference",
+      },
+      actions: {
+        createPayment: "Record payment",
+      },
+      errors: {
+        accessUnavailable: "Access facts are unavailable for this action.",
+        conflict:
+          "The commercial state changed on the server. Refresh and review before retrying.",
+        denied: "The Backend rejected this action for the current access.",
+        malformed:
+          "The Backend returned unexpected commercial data, so the UI failed closed.",
+        unavailable: "Commercial state could not be loaded. Try again.",
+        validation: "Review the required fields and try again.",
+      },
+      status: {
+        created: "Payment recorded.",
       },
     },
   },

@@ -1,0 +1,142 @@
+.module {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.header,
+.panel,
+.statePanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.header {
+  align-items: start;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.header h1,
+.panel h2 {
+  margin: 0;
+}
+
+.header p,
+.panel p {
+  color: var(--color-text-muted);
+}
+
+.feedback {
+  color: var(--color-text-muted);
+  font-weight: 700;
+  min-height: 1.5rem;
+}
+
+.feedback [role="alert"] {
+  color: var(--color-danger);
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.statePanel {
+  display: grid;
+  min-height: 16rem;
+  place-content: center;
+  text-align: center;
+}
+
+.metricGrid,
+.formGrid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.metric,
+.item {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.metric {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.metric span,
+.formGrid span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.metric strong {
+  overflow-wrap: anywhere;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.item {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.item h3,
+.item p {
+  margin: 0;
+}
+
+.formGrid label {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.formGrid input {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  min-height: 2.5rem;
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
+}
+
+.formGrid button {
+  align-self: end;
+  background: var(--color-primary);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-primary-foreground);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 2.5rem;
+  padding-block: var(--space-2);
+  padding-inline: var(--space-4);
+}
+
+.formGrid button:disabled {
+  background: var(--color-disabled);
+  color: var(--color-disabled-foreground);
+  cursor: not-allowed;
+}
+
+@media (max-width: 42rem) {
+  .header,
+  .item {
+    display: grid;
+  }
+}
