@@ -440,6 +440,205 @@ describe("training experience UI", () => {
     expect(screen.getByText("Pulse Gym")).toBeInTheDocument();
   });
 
+  test("late relationship A detail cannot render after selecting relationship B", async () => {
+    const pendingA = deferred<unknown>();
+    const relationshipA = relationshipId("a");
+    const relationshipB = relationshipId("b");
+    const programA = "program_a" as ProgramId;
+    const programB = "program_b" as ProgramId;
+    mockTrainingData({
+      read: (request) => {
+        if (isRelationshipListPath(request.path, "workspace_a")) {
+          return {
+            data: [
+              relationship("workspace_a", relationshipA),
+              relationship("workspace_a", relationshipB),
+            ],
+          };
+        }
+        if (request.path.includes(`/relationships/${relationshipA}/programs?`))
+          return {
+            data: [
+              program({
+                id: programA,
+                name: "Relationship A plan",
+                relationshipId: relationshipA,
+              }),
+            ],
+          };
+        if (
+          request.path.endsWith(
+            `/relationships/${relationshipA}/programs/${programA}`,
+          )
+        )
+          return pendingA.promise;
+        if (request.path.includes(`/relationships/${relationshipB}/programs?`))
+          return {
+            data: [
+              program({
+                id: programB,
+                name: "Relationship B plan",
+                relationshipId: relationshipB,
+              }),
+            ],
+          };
+        if (
+          request.path.endsWith(
+            `/relationships/${relationshipB}/programs/${programB}`,
+          )
+        )
+          return {
+            data: {
+              program: program({
+                id: programB,
+                name: "Relationship B plan",
+                relationshipId: relationshipB,
+              }),
+              revision: revision({ dayName: "Relationship B day" }),
+            },
+          };
+        if (
+          request.path.endsWith(
+            `/relationships/${relationshipA}/workouts/current`,
+          ) ||
+          request.path.endsWith(
+            `/relationships/${relationshipB}/workouts/current`,
+          )
+        )
+          return { data: { workout: null } };
+        if (
+          request.path.includes(`/relationships/${relationshipA}/workouts?`) ||
+          request.path.includes(`/relationships/${relationshipB}/workouts?`) ||
+          request.path.includes(
+            `/relationships/${relationshipA}/personal-records?`,
+          ) ||
+          request.path.includes(
+            `/relationships/${relationshipB}/personal-records?`,
+          ) ||
+          request.path.includes(
+            `/relationships/${relationshipA}/personal-record-events?`,
+          ) ||
+          request.path.includes(
+            `/relationships/${relationshipB}/personal-record-events?`,
+          )
+        )
+          return { data: [] };
+        return undefined;
+      },
+    });
+    renderTraining();
+    await screen.findByText(relationshipA);
+    fireEvent.click(screen.getByText(relationshipB));
+    await screen.findByText("Relationship B plan");
+    await act(async () => {
+      pendingA.resolve({
+        data: {
+          program: program({
+            id: programA,
+            name: "Old relationship A detail",
+            relationshipId: relationshipA,
+          }),
+          revision: revision({ dayName: "Old relationship A day" }),
+        },
+      });
+      await pendingA.promise;
+    });
+    expect(
+      screen.queryByText("Old relationship A detail"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Old relationship A day"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Relationship B plan")).toBeInTheDocument();
+  });
+
+  test("late program A detail cannot replace selected program B", async () => {
+    const pendingA = deferred<unknown>();
+    const programA = "program_a" as ProgramId;
+    const programB = "program_b" as ProgramId;
+    mockTrainingData({
+      read: (request) => {
+        if (request.path.includes("/programs?"))
+          return {
+            data: [
+              program({ id: programA, name: "Program A" }),
+              program({ id: programB, name: "Program B" }),
+            ],
+          };
+        if (request.path.endsWith(`/programs/${programA}`))
+          return pendingA.promise;
+        if (request.path.endsWith(`/programs/${programB}`))
+          return {
+            data: {
+              program: program({ id: programB, name: "Program B" }),
+              revision: revision({ dayName: "Program B day" }),
+            },
+          };
+        return undefined;
+      },
+    });
+    renderTraining();
+    await screen.findByText("Program B");
+    fireEvent.click(screen.getByText("Program B"));
+    const edit = await screen.findByRole("button", { name: "Edit program" });
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    expect(
+      await screen.findByDisplayValue("Program B day"),
+    ).toBeInTheDocument();
+    await act(async () => {
+      pendingA.resolve({
+        data: {
+          program: program({ id: programA, name: "Old Program A detail" }),
+          revision: revision({ dayName: "Old Program A day" }),
+        },
+      });
+      await pendingA.promise;
+    });
+    expect(
+      screen.queryByDisplayValue("Old Program A day"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Program B day")).toBeInTheDocument();
+  });
+
+  test("late workout A correction cannot publish feedback after selecting workout B", async () => {
+    const pendingA = deferred<unknown>();
+    const workoutA = completedWorkout("workout_a" as WorkoutId);
+    const workoutB = completedWorkout("workout_b" as WorkoutId);
+    mockTrainingData({
+      read: (request) => {
+        if (request.path.endsWith("/workouts/current"))
+          return { data: { workout: null } };
+        if (request.path.includes("/workouts?"))
+          return { data: [workoutA, workoutB] };
+        return undefined;
+      },
+      mutate: (request) =>
+        request.path.endsWith("/workout_a/corrections")
+          ? pendingA.promise
+          : undefined,
+    });
+    renderTraining();
+    fireEvent.click(await screen.findByRole("button", { name: /workout_a/ }));
+    fireEvent.change(screen.getByLabelText("Correction reason"), {
+      target: { value: "Verified stale selection" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Correct completed workout" }),
+    );
+    await waitFor(() => expect(trainingCommandCalls()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: /workout_b/ }));
+    await act(async () => {
+      pendingA.resolve({ data: { workout: workoutA } });
+      await pendingA.promise;
+    });
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /workout_b/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
   test("activate program sends exact expectedVersion body and stable idempotency key", async () => {
     mockTrainingData({
       mutate: (request) => {
@@ -704,11 +903,14 @@ function trainingCommandCalls() {
     .filter((request) => request.method !== "GET");
 }
 
-function relationship(workspaceIdValue: string) {
+function relationship(
+  workspaceIdValue: string,
+  id: RelationshipId = relationshipId(workspaceIdValue),
+) {
   return {
     createdAt: "2026-01-01T00:00:00.000Z",
     engagementPeriods: [{ startedAt: "2026-01-01T00:00:00.000Z" }],
-    id: relationshipId(workspaceIdValue),
+    id,
     status: "ACTIVE",
     traineeUserId: `trainee_${workspaceIdValue}`,
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -731,12 +933,12 @@ function program(input: Partial<TrainingProgramDto> = {}): TrainingProgramDto {
   };
 }
 
-function revision() {
+function revision(input: Partial<{ dayName: string }> = {}) {
   return {
     days: [
       {
         exercises: [],
-        name: "Lower",
+        name: input.dayName ?? "Lower",
         sequence: 1,
         type: "RESISTANCE",
       },
@@ -771,6 +973,30 @@ function workout(workspaceIdValue: string): WorkoutSessionDto {
     traineeUserId: "trainee_a" as WorkoutSessionDto["traineeUserId"],
     version: 7,
     workspaceId: workspaceIdValue as WorkspaceId,
+  };
+}
+
+function completedWorkout(id: WorkoutId): WorkoutSessionDto {
+  return {
+    ...workout("workspace_a"),
+    id,
+    status: "COMPLETED",
+    exercises: [
+      {
+        exerciseId:
+          "exercise_a" as WorkoutSessionDto["exercises"][number]["exerciseId"],
+        exerciseNameSnapshot: "Squat",
+        workoutExerciseKey: `${id}-exercise`,
+        sets: [
+          {
+            completed: true,
+            reps: 5,
+            setKey: `${id}-set`,
+            weight: 80,
+          },
+        ],
+      },
+    ],
   };
 }
 

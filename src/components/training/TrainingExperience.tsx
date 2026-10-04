@@ -606,17 +606,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
         <p>{disabledReason(readDecisions.relationships, labels)}</p>
       </section>
     );
-  if (
-    [
-      relationshipsQuery,
-      programsQuery,
-      programQuery,
-      currentWorkoutQuery,
-      workoutsQuery,
-      recordsQuery,
-      recordEventsQuery,
-    ].some((query) => query.isLoading)
-  )
+  if (relationshipsQuery.isLoading)
     return (
       <section role="status" className={styles.statePanel}>
         <h1>{labels.loading}</h1>
