@@ -31,6 +31,7 @@ export interface AccessRequirement {
   accessContext?: AuthorizationCacheContext;
   sessionGeneration: number;
   workspaceId?: WorkspaceId;
+  membershipId?: MembershipId;
   branchId?: BranchId;
   relationshipId?: RelationshipId;
 }

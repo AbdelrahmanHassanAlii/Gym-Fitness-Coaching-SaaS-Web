@@ -137,6 +137,7 @@ export function StaffShell({
       requestCurrentUserEffectiveAccessDecisions(
         apiClient,
         selectedWorkspace!.workspaceId,
+        selectedWorkspace!.membershipId,
         {
           ...(selectedWorkspace!.accessVersion === undefined
             ? {}

@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import type {
   ApiDataEnvelope,
   CurrentUserEffectiveAccessDecisionsDto,
+  MembershipId,
   PermissionKey,
   BranchId,
   RelationshipId,
@@ -27,6 +28,7 @@ describe("current-user effective access decisions", () => {
     await requestCurrentUserEffectiveAccessDecisions(
       apiClient,
       "workspace_a" as WorkspaceId,
+      "membership_a" as MembershipId,
       {
         expectedAccessVersion: 3,
         requests: [
@@ -71,6 +73,50 @@ describe("current-user effective access decisions", () => {
       ),
     ).toThrow(/count/i);
     expect(apiClient.request).not.toHaveBeenCalled();
+  });
+
+  test("rejects responses for the wrong workspace membership or access version", async () => {
+    const requests: CurrentUserEffectiveAccessDecisionsDto["decisions"][number]["request"][] =
+      [{ permission: "programs.read", scope: "WORKSPACE" }];
+
+    await expect(
+      requestCurrentUserEffectiveAccessDecisions(
+        fakeApiClient(
+          response(requests, {
+            membershipId: "membership_b" as MembershipId,
+          }),
+        ),
+        "workspace_a" as WorkspaceId,
+        "membership_a" as MembershipId,
+        { expectedAccessVersion: 3, requests },
+      ),
+    ).rejects.toThrow(/membership/i);
+
+    await expect(
+      requestCurrentUserEffectiveAccessDecisions(
+        fakeApiClient(
+          response(requests, {
+            workspaceId: "workspace_b" as WorkspaceId,
+          }),
+        ),
+        "workspace_a" as WorkspaceId,
+        "membership_a" as MembershipId,
+        { expectedAccessVersion: 3, requests },
+      ),
+    ).rejects.toThrow(/workspace/i);
+
+    await expect(
+      requestCurrentUserEffectiveAccessDecisions(
+        fakeApiClient(
+          response(requests, {
+            accessVersion: 8,
+          }),
+        ),
+        "workspace_a" as WorkspaceId,
+        "membership_a" as MembershipId,
+        { expectedAccessVersion: 7, requests },
+      ),
+    ).rejects.toThrow(/access version/i);
   });
 
   test("maps minimized Backend decisions into WEB-010 presentation facts without policy internals", () => {
@@ -157,10 +203,16 @@ function fakeApiClient(
 
 function response(
   requests: CurrentUserEffectiveAccessDecisionsDto["decisions"][number]["request"][],
+  overrides: Partial<
+    Pick<
+      CurrentUserEffectiveAccessDecisionsDto,
+      "accessVersion" | "membershipId" | "workspaceId"
+    >
+  > = {},
 ): ApiDataEnvelope<CurrentUserEffectiveAccessDecisionsDto> {
   return {
     data: {
-      accessVersion: 3,
+      accessVersion: overrides.accessVersion ?? 3,
       context: "SUPPORT_USER_CONTEXT",
       decisions: requests.map((request) => ({
         allowed: true,
@@ -168,8 +220,9 @@ function response(
         request,
       })),
       membershipId:
-        "membership_a" as CurrentUserEffectiveAccessDecisionsDto["membershipId"],
-      workspaceId: "workspace_a" as WorkspaceId,
+        overrides.membershipId ??
+        ("membership_a" as CurrentUserEffectiveAccessDecisionsDto["membershipId"]),
+      workspaceId: overrides.workspaceId ?? ("workspace_a" as WorkspaceId),
     },
   };
 }

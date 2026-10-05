@@ -79,11 +79,11 @@ export function evaluateAccess(
 export function isCurrentAccessIdentity(
   facts: Pick<
     AccessFacts,
-    "accessContext" | "sessionGeneration" | "workspaceId"
+    "accessContext" | "membershipId" | "sessionGeneration" | "workspaceId"
   >,
   requirement: Pick<
     AccessRequirement,
-    "accessContext" | "sessionGeneration" | "workspaceId"
+    "accessContext" | "membershipId" | "sessionGeneration" | "workspaceId"
   >,
 ): boolean {
   if (facts.sessionGeneration !== requirement.sessionGeneration) {
@@ -97,6 +97,13 @@ export function isCurrentAccessIdentity(
   if (
     requirement.workspaceId !== undefined &&
     requirement.workspaceId !== facts.workspaceId
+  ) {
+    return false;
+  }
+
+  if (
+    requirement.membershipId !== undefined &&
+    requirement.membershipId !== facts.membershipId
   ) {
     return false;
   }

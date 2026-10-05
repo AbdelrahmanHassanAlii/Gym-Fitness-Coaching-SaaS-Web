@@ -219,6 +219,26 @@ describe("permission access UX model", () => {
     });
   });
 
+  test("membership A facts cannot authorize membership B in the same workspace", () => {
+    const facts = readyFacts(
+      [permissionDecision("staff.read", true, "ALLOW")],
+      1,
+      workspaceA,
+    );
+
+    expect(
+      evaluateAccess(facts, {
+        accessContext: "user",
+        context: "WORKSPACE",
+        membershipId: membershipB,
+        permission: "staff.read",
+        scope: "workspace",
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+    ).toMatchObject({ allowed: false, reason: "stale" });
+  });
+
   test("late account and workspace query results do not authorize the new boundary", async () => {
     const queryClient = new QueryClient();
     const accessKey = createAccessQueryKey({

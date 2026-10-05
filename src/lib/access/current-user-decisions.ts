@@ -3,6 +3,7 @@ import type {
   CurrentUserEffectiveAccessDecisionRequestDto,
   CurrentUserEffectiveAccessDecisionsDto,
   CurrentUserEffectiveAccessDecisionsRequestDto,
+  MembershipId,
   PermissionDecisionDto,
   PermissionScopeDto,
   WorkspaceId,
@@ -27,6 +28,7 @@ export type CurrentUserDecisionRequest =
 export async function requestCurrentUserEffectiveAccessDecisions(
   apiClient: ApiClient,
   workspaceId: WorkspaceId,
+  membershipId: MembershipId,
   body: CurrentUserEffectiveAccessDecisionsRequestDto,
   signal?: AbortSignal,
 ): Promise<CurrentUserEffectiveAccessDecisionsDto> {
@@ -49,6 +51,19 @@ export async function requestCurrentUserEffectiveAccessDecisions(
 
   if (envelope.data.workspaceId !== workspaceId) {
     throw malformedCurrentUserDecisions("current-user decisions workspace");
+  }
+
+  if (envelope.data.membershipId !== membershipId) {
+    throw malformedCurrentUserDecisions("current-user decisions membership");
+  }
+
+  if (
+    body.expectedAccessVersion !== undefined &&
+    envelope.data.accessVersion !== body.expectedAccessVersion
+  ) {
+    throw malformedCurrentUserDecisions(
+      "current-user decisions access version",
+    );
   }
 
   return envelope.data;

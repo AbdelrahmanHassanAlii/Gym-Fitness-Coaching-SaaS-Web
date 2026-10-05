@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import type {
+  MembershipId,
   PermissionDecisionDto,
   ProgramId,
   RelationshipId,
@@ -161,6 +162,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
 
   const workspaceId = workspace?.workspaceId ?? null;
   const selectedWorkspace = workspace;
+  const membershipId = selectedWorkspace?.membershipId;
   const accessContext = shellContext?.accessContext ?? "user";
   const canQuery = state.status === "authenticated" && workspaceId !== null;
   const readDecisions = {
@@ -168,6 +170,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "trainees.read",
       workspaceId,
     }),
@@ -175,6 +178,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "programs.read",
       workspaceId,
     }),
@@ -182,6 +186,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.read",
       workspaceId,
     }),
@@ -189,6 +194,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "personal_records.read",
       workspaceId,
     }),
@@ -383,6 +389,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "programs.activate",
       workspaceId,
     }),
@@ -390,6 +397,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.abandon",
       workspaceId,
     }),
@@ -397,6 +405,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.complete",
       workspaceId,
     }),
@@ -404,6 +413,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.day.defer",
       workspaceId,
     }),
@@ -411,6 +421,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.day.skip",
       workspaceId,
     }),
@@ -418,6 +429,7 @@ function TrainingContent({ labels }: { labels: TrainingLabels }) {
       accessContext,
       accessFacts,
       generation,
+      membershipId,
       permission: "workouts.create",
       workspaceId,
     }),
@@ -1029,12 +1041,14 @@ function actionDecision({
   accessContext,
   accessFacts,
   generation,
+  membershipId,
   permission,
   workspaceId,
 }: {
   accessContext: "support" | "user";
   accessFacts: ReturnType<typeof useStaffWorkspaceContext>["accessFacts"];
   generation: number;
+  membershipId?: MembershipId;
   permission: PermissionDecisionDto["permission"];
   workspaceId: WorkspaceId | null;
 }): AccessDecision {
@@ -1044,6 +1058,7 @@ function actionDecision({
     permission,
     scope: "workspace",
     sessionGeneration: generation,
+    membershipId,
     workspaceId: workspaceId ?? undefined,
   });
 }

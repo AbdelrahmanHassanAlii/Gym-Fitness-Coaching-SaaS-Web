@@ -85,13 +85,14 @@ function useEditorAccess(
   workspaceId: WorkspaceId,
 ) {
   const { generation } = useAuthSession();
-  const { accessFacts, shellContext } = useStaffWorkspaceContext();
+  const { accessFacts, shellContext, workspace } = useStaffWorkspaceContext();
   return evaluateAccess(accessFacts, {
     permission,
     workspaceId,
     sessionGeneration: generation,
     accessContext: shellContext?.accessContext ?? "user",
     context: "WORKSPACE",
+    membershipId: workspace?.membershipId,
     scope: "workspace",
   });
 }

@@ -213,6 +213,7 @@ export function accessRequirement(
     permission,
     scope: context.branch.branchId === null ? "workspace" : "branch",
     sessionGeneration: context.sessionGeneration,
+    membershipId: context.workspace.membershipId,
     workspaceId: context.workspace.workspaceId,
     ...(context.branch.branchId === null
       ? {}

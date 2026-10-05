@@ -8,6 +8,7 @@ import type {
   ApiDataEnvelope,
   CurrentUserEffectiveAccessDecisionsDto,
   MyWorkspaceDto,
+  MembershipId,
   PermissionKey,
   SafeAuthUserDto,
   UserId,
@@ -414,6 +415,33 @@ describe("staff shell", () => {
     expect(
       await screen.findByRole("link", { name: /Training/i }),
     ).toHaveAttribute("href", "/app/training");
+  });
+
+  test("wrong-membership Route A response fails closed before exposing training navigation", async () => {
+    mocks.pathname = "/app/training";
+    const effectiveAccess =
+      deferred<ApiDataEnvelope<CurrentUserEffectiveAccessDecisionsDto>>();
+    mockWorkspaces([staffWorkspace], { effectiveAccess });
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    effectiveAccess.resolve({
+      data: {
+        ...effectiveAccessResponse(staffWorkspace, {
+          permissions: ["programs.read"],
+        }),
+        membershipId: "membership_other" as MembershipId,
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", {
+          name: /TrainingPrograms, workouts, and PRs/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   test("access-version conflict refetches workspace context without logging out", async () => {
