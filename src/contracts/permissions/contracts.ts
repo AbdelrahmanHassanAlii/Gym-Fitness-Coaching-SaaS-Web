@@ -7,6 +7,15 @@ import type {
 
 export const permissionContexts = ["PLATFORM", "WORKSPACE"] as const;
 export const permissionEffects = ["ALLOW", "DENY"] as const;
+export const currentUserEffectiveAccessContexts = [
+  "USER",
+  "SUPPORT_USER_CONTEXT",
+] as const;
+export const currentUserEffectiveAccessScopes = [
+  "WORKSPACE",
+  "BRANCH",
+  "RELATIONSHIP",
+] as const;
 export const permissionScopeTypes = [
   "SELF",
   "ASSIGNED_TRAINEES",
@@ -186,6 +195,10 @@ export const permissionKeys = [
 
 export type PermissionContext = (typeof permissionContexts)[number];
 export type PermissionEffect = (typeof permissionEffects)[number];
+export type CurrentUserEffectiveAccessContext =
+  (typeof currentUserEffectiveAccessContexts)[number];
+export type CurrentUserEffectiveAccessScope =
+  (typeof currentUserEffectiveAccessScopes)[number];
 export type PermissionScopeType = (typeof permissionScopeTypes)[number];
 export type PermissionKey = (typeof permissionKeys)[number];
 export type AccessDecisionSource = "EXPLICIT_GRANT" | "PROFILE" | "NONE";
@@ -232,8 +245,111 @@ export interface WorkspaceQueryAccessDto {
   reasons: readonly string[];
 }
 
+export interface CurrentUserEffectiveAccessDecisionRequestDto {
+  permission: PermissionKey;
+  scope: CurrentUserEffectiveAccessScope;
+  branchId?: BranchId | null;
+  relationshipId?: RelationshipId | null;
+}
+
+export interface CurrentUserEffectiveAccessDecisionsRequestDto {
+  expectedAccessVersion?: number;
+  requests: readonly CurrentUserEffectiveAccessDecisionRequestDto[];
+}
+
+export interface CurrentUserEffectiveAccessDecisionDto {
+  request: CurrentUserEffectiveAccessDecisionRequestDto;
+  allowed: boolean;
+  effect: PermissionEffect;
+}
+
+export interface CurrentUserEffectiveAccessDecisionsDto {
+  workspaceId: WorkspaceId;
+  membershipId: MembershipId;
+  accessVersion: number;
+  context: CurrentUserEffectiveAccessContext;
+  decisions: readonly CurrentUserEffectiveAccessDecisionDto[];
+}
+
 const permissionKeySet = new Set<string>(permissionKeys);
+const currentUserEffectiveAccessScopeSet = new Set<string>(
+  currentUserEffectiveAccessScopes,
+);
+const currentUserEffectiveAccessContextSet = new Set<string>(
+  currentUserEffectiveAccessContexts,
+);
 
 export function isPermissionKey(value: string): value is PermissionKey {
   return permissionKeySet.has(value);
+}
+
+export function isCurrentUserEffectiveAccessDecisionRequestDto(
+  value: unknown,
+): value is CurrentUserEffectiveAccessDecisionRequestDto {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const branchId = value.branchId;
+  const relationshipId = value.relationshipId;
+  if (
+    typeof value.permission !== "string" ||
+    !isPermissionKey(value.permission) ||
+    typeof value.scope !== "string" ||
+    !currentUserEffectiveAccessScopeSet.has(value.scope)
+  ) {
+    return false;
+  }
+
+  if (value.scope === "WORKSPACE") {
+    return branchId === undefined && relationshipId === undefined;
+  }
+
+  if (value.scope === "BRANCH") {
+    return (
+      typeof branchId === "string" &&
+      branchId.length > 0 &&
+      relationshipId === undefined
+    );
+  }
+
+  return (
+    typeof relationshipId === "string" &&
+    relationshipId.length > 0 &&
+    branchId === undefined
+  );
+}
+
+export function isCurrentUserEffectiveAccessDecisionsDto(
+  value: unknown,
+): value is CurrentUserEffectiveAccessDecisionsDto {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.workspaceId === "string" &&
+    typeof value.membershipId === "string" &&
+    typeof value.accessVersion === "number" &&
+    Number.isFinite(value.accessVersion) &&
+    typeof value.context === "string" &&
+    currentUserEffectiveAccessContextSet.has(value.context) &&
+    Array.isArray(value.decisions) &&
+    value.decisions.every(isCurrentUserEffectiveAccessDecisionDto)
+  );
+}
+
+function isCurrentUserEffectiveAccessDecisionDto(
+  value: unknown,
+): value is CurrentUserEffectiveAccessDecisionDto {
+  return (
+    isRecord(value) &&
+    isCurrentUserEffectiveAccessDecisionRequestDto(value.request) &&
+    typeof value.allowed === "boolean" &&
+    (value.effect === "ALLOW" || value.effect === "DENY")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

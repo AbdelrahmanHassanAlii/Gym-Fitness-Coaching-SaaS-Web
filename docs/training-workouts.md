@@ -72,11 +72,23 @@ All mutation invalidation captures workspace, relationship, program, generation,
 
 CAS values come from the loaded target: program version for activation/revision, workout version for actuals/completion/abandon/correction, and progress version for skip/defer. Users do not type internal version numbers. Successful mutations refresh only captured training keys. Workout writes also refresh PRs/events; program writes refresh program list/detail. A failed ambiguous non-idempotent program create disables resubmission until the user reloads/reconciles the list.
 
-## Current Integration Limitation
+## Current-User Effective Access Integration
 
-The locked `StaffShell` produces `AccessFacts` with `decisions: []` (`shellAccessFacts`). It has no verified general current-user effective-permission feed. Consequently the production route currently fails closed before issuing protected training reads, and every mutation requires explicit verified facts. WEB-015 does not populate these facts from roles or call the admin membership effective-access inspection endpoint.
+Stage 19 provides the production current-user decision producer:
 
-Tests inject verified effective-decision presentation models to exercise the implementation. This proves Web behavior with supplied facts, but is not seed-backed live trainer/assistant integration. A verified current-user facts producer and a configured seeded Backend are required before claiming the issue's live workflow testing complete. The issue must remain open and the branch must not be merged while that integration gate is unresolved.
+`POST /api/v1/workspaces/:workspaceId/me/effective-access/decisions`
+
+`StaffShell` requests only the bounded decision set needed by the active staff route, including the WEB-015 training permissions on `/app/training`. The request includes the current workspace membership `accessVersion` from `/me/workspaces` when available. Responses contain minimized, already-effective decisions only: `workspaceId`, `membershipId`, `accessVersion`, `context`, and `{ request, allowed, effect }` rows. Web maps those rows into WEB-010 presentation facts with `source: "NONE"`; it does not receive raw grants, profiles, reasons, branch assignment internals, or support session identifiers.
+
+The old admin inspection endpoint remains unused:
+
+`GET /api/v1/workspaces/:workspaceId/memberships/:membershipId/effective-access`
+
+That route still requires `staff.permissions.manage` and is not a current-user `can()` route.
+
+Access-decision cache identity includes workspace, membership, access context, session generation, membership access version, and the normalized request set. If Stage 19 returns `WORKSPACE_MEMBERSHIP_ACCESS_VERSION_CONFLICT`, Web invalidates `/me/workspaces`, discards the stale decision key, and refetches decisions for the refreshed access version. Missing, unresolved, error, denied, stale, or malformed decision facts continue to fail closed.
+
+`USER` and `SUPPORT_USER_CONTEXT` responses are mapped to the existing non-secret access-context discriminator so support-context decisions do not contaminate normal user decisions. Web still performs no Stage 4 evaluation: Backend computes the decisions, and every target training/workout/PR route independently authorizes the request again.
 
 ## Error Semantics
 

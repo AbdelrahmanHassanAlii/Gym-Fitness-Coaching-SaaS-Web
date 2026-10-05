@@ -1,15 +1,23 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import type { ApiDataEnvelope, WorkspaceId } from "@/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ApiDataEnvelope, PermissionKey, WorkspaceId } from "@/contracts";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { useAuthSession } from "@/lib/auth";
 import type { AccessFacts } from "@/lib/access";
-import { accessFactsFromDecision } from "@/lib/access";
+import {
+  currentUserEffectiveAccessFacts,
+  currentUserEffectiveAccessQueryKey,
+  erroredCurrentUserAccessFacts,
+  isAccessVersionConflict,
+  requestCurrentUserEffectiveAccessDecisions,
+  type CurrentUserDecisionRequest,
+  unresolvedCurrentUserAccessFacts,
+} from "@/lib/access";
 import {
   createStaffNavigation,
   createStaffShellContext,
@@ -73,6 +81,7 @@ export function StaffShell({
 }) {
   const direction = getLocaleDirection(locale);
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const { apiClient, generation, logout, state } = useAuthSession();
   const [isMenuOpen, setMenuOpen] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] =
@@ -106,6 +115,61 @@ export function StaffShell({
     ) ??
     staffWorkspaces[0] ??
     null;
+  const accessDecisionRequests = useMemo(
+    () => currentUserDecisionRequestsForPath(pathname),
+    [pathname],
+  );
+  const accessIdentity =
+    selectedWorkspace === null
+      ? null
+      : {
+          accessContext: "user" as const,
+          membershipId: selectedWorkspace.membershipId,
+          sessionGeneration: generation,
+          workspaceId: selectedWorkspace.workspaceId,
+        };
+  const effectiveAccessQuery = useQuery({
+    enabled:
+      state.status === "authenticated" &&
+      selectedWorkspace !== null &&
+      accessDecisionRequests.length > 0,
+    queryFn: ({ signal }) =>
+      requestCurrentUserEffectiveAccessDecisions(
+        apiClient,
+        selectedWorkspace!.workspaceId,
+        {
+          ...(selectedWorkspace!.accessVersion === undefined
+            ? {}
+            : { expectedAccessVersion: selectedWorkspace!.accessVersion }),
+          requests: accessDecisionRequests,
+        },
+        signal,
+      ),
+    queryKey:
+      selectedWorkspace === null
+        ? ["staff-shell", "effective-access", "none"]
+        : currentUserEffectiveAccessQueryKey({
+            accessContext: "user",
+            accessVersion: selectedWorkspace.accessVersion ?? null,
+            membershipId: selectedWorkspace.membershipId,
+            requests: accessDecisionRequests,
+            sessionGeneration: generation,
+            workspaceId: selectedWorkspace.workspaceId,
+          }),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (isAccessVersionConflict(effectiveAccessQuery.error)) {
+      void queryClient.invalidateQueries({
+        queryKey: appQueryKeys.resource(
+          ["staff-shell", "workspaces", generation],
+          "current-user",
+        ),
+      });
+    }
+  }, [effectiveAccessQuery.error, generation, queryClient]);
+
   let context: StaffShellContext | null = null;
   if (selectedWorkspace !== null) {
     context = createStaffShellContext({
@@ -115,11 +179,15 @@ export function StaffShell({
     });
   }
   const accessFacts =
-    selectedWorkspace === null
+    accessIdentity === null
       ? null
-      : shellAccessFacts({
-          generation,
-          workspace: selectedWorkspace,
+      : accessFactsForQuery({
+          data: effectiveAccessQuery.data,
+          error: effectiveAccessQuery.error,
+          identity: accessIdentity,
+          isError: effectiveAccessQuery.isError,
+          isLoading:
+            effectiveAccessQuery.isLoading || effectiveAccessQuery.isFetching,
         });
   const navigation = createStaffNavigation({
     accessFacts,
@@ -274,21 +342,6 @@ export function StaffShell({
   );
 }
 
-function shellAccessFacts({
-  generation,
-  workspace,
-}: {
-  generation: number;
-  workspace: NonNullable<ReturnType<typeof selectStaffWorkspaces>[number]>;
-}): AccessFacts {
-  return accessFactsFromDecision({
-    decisions: [],
-    membershipId: workspace.membershipId,
-    sessionGeneration: generation,
-    workspaceId: workspace.workspaceId,
-  });
-}
-
 function workspaceContentState(input: {
   hasStaffWorkspaces: boolean;
   isError: boolean;
@@ -307,6 +360,117 @@ function workspaceContentState(input: {
   }
 
   return "ready";
+}
+
+function accessFactsForQuery(input: {
+  data:
+    Parameters<typeof currentUserEffectiveAccessFacts>[0]["data"] | undefined;
+  error: unknown;
+  identity: Pick<
+    AccessFacts,
+    "accessContext" | "membershipId" | "sessionGeneration" | "workspaceId"
+  >;
+  isError: boolean;
+  isLoading: boolean;
+}): AccessFacts {
+  if (input.data !== undefined && !input.isLoading) {
+    return currentUserEffectiveAccessFacts({
+      data: input.data,
+      sessionGeneration: input.identity.sessionGeneration,
+    });
+  }
+
+  if (input.isError) {
+    return erroredCurrentUserAccessFacts({
+      ...input.identity,
+      error: input.error,
+    });
+  }
+
+  return unresolvedCurrentUserAccessFacts(input.identity);
+}
+
+function currentUserDecisionRequestsForPath(
+  pathname: string,
+): CurrentUserDecisionRequest[] {
+  const requests = new Map<string, CurrentUserDecisionRequest>();
+  for (const permission of [
+    "billing.subscription.read",
+    "programs.read",
+    "staff.read",
+    "trainees.read",
+    "workspace.read",
+  ] satisfies PermissionKey[]) {
+    requests.set(permission, workspaceRequest(permission));
+  }
+
+  if (pathname.startsWith("/app/workspace")) {
+    for (const permission of [
+      "branches.archive",
+      "branches.create",
+      "branches.read",
+      "branches.update",
+      "staff.branches.manage",
+      "staff.invite",
+      "staff.manage",
+      "workspace.update",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/leads")) {
+    for (const permission of [
+      "billing.payments.create",
+      "billing.payments.read",
+      "billing.subscription.read",
+      "billing.usage.read",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/relationships")) {
+    for (const permission of [
+      "trainees.assignments.assistant.manage",
+      "trainees.assignments.nutritionist.manage",
+      "trainees.assignments.primary.manage",
+      "trainees.read",
+      "trainees.update",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/training")) {
+    for (const permission of [
+      "exercises.read",
+      "personal_records.read",
+      "programs.activate",
+      "programs.create",
+      "programs.read",
+      "programs.update",
+      "trainees.read",
+      "workouts.abandon",
+      "workouts.complete",
+      "workouts.correct",
+      "workouts.create",
+      "workouts.day.defer",
+      "workouts.day.skip",
+      "workouts.read",
+      "workouts.update",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  return Array.from(requests.values());
+}
+
+function workspaceRequest(
+  permission: PermissionKey,
+): CurrentUserDecisionRequest {
+  return { permission, scope: "WORKSPACE" };
 }
 
 function navStatusLabel(

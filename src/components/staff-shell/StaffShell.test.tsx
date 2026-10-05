@@ -6,7 +6,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   ApiDataEnvelope,
+  CurrentUserEffectiveAccessDecisionsDto,
   MyWorkspaceDto,
+  PermissionKey,
   SafeAuthUserDto,
   UserId,
   WorkspaceId,
@@ -71,6 +73,8 @@ const traineeWorkspace = workspace({
   workspaceId: "workspace_t" as WorkspaceId,
   workspaceName: "Trainee Gym",
 });
+
+type Deferred<T> = ReturnType<typeof deferred<T>>;
 
 describe("staff shell", () => {
   beforeEach(() => {
@@ -287,15 +291,27 @@ describe("staff shell", () => {
       "/app",
     );
     expect(
-      screen.getByRole("link", {
+      await screen.findByRole("link", {
         name: /Workspace & branchesManage workspace settings and branches/i,
       }),
     ).toHaveAttribute("href", "/app/workspace");
+    expect(
+      screen.getByRole("link", {
+        name: /CommercialSubscription, usage, and payments/i,
+      }),
+    ).toHaveAttribute("href", "/app/leads");
+    expect(
+      screen.getByRole("link", {
+        name: /RelationshipsTrainee relationship and assignment workflows/i,
+      }),
+    ).toHaveAttribute("href", "/app/relationships");
+    expect(
+      screen.getByRole("link", {
+        name: /Training/i,
+      }),
+    ).toHaveAttribute("href", "/app/training");
     for (const label of [
       "Staff",
-      "Leads",
-      "Relationships",
-      "Training",
       "Nutrition",
       "Progress",
       "Documents",
@@ -306,6 +322,121 @@ describe("staff shell", () => {
         screen.queryByRole("link", { name: new RegExp(`^${label}\\b`, "i") }),
       ).not.toBeInTheDocument();
     }
+  });
+
+  test("requests current-user effective decisions for the active training route", async () => {
+    mocks.pathname = "/app/training";
+    mockWorkspaces([staffWorkspace]);
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.authSession.apiClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "POST",
+          path: "/workspaces/workspace_a/me/effective-access/decisions",
+        }),
+      ),
+    );
+    const effectiveAccessCall = mocks.authSession.apiClient.request.mock.calls
+      .map((call) => call[0])
+      .find((options) =>
+        String(options.path).endsWith("/me/effective-access/decisions"),
+      );
+    expect(effectiveAccessCall?.path).not.toContain(
+      "/memberships/membership_workspace_a/effective-access",
+    );
+    expect(effectiveAccessCall?.body).toMatchObject({
+      expectedAccessVersion: 1,
+    });
+    expect(
+      effectiveAccessCall?.body.requests.map(
+        (request: { permission: PermissionKey }) => request.permission,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "programs.read",
+        "workouts.complete",
+        "personal_records.read",
+        "exercises.read",
+      ]),
+    );
+    expect(effectiveAccessCall?.body.requests).toHaveLength(
+      new Set(
+        effectiveAccessCall?.body.requests.map((request: object) =>
+          JSON.stringify(request),
+        ),
+      ).size,
+    );
+    expect(effectiveAccessCall?.body.requests.length).toBeLessThanOrEqual(25);
+  });
+
+  test("denied Backend decisions do not expose protected training navigation", async () => {
+    mocks.pathname = "/app/training";
+    mockWorkspaces([staffWorkspace], {
+      denied: ["programs.read"],
+    });
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", {
+          name: /TrainingPrograms, workouts, and PRs/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  test("unresolved effective decisions do not flash protected training navigation", async () => {
+    mocks.pathname = "/app/training";
+    const effectiveAccess =
+      deferred<ApiDataEnvelope<CurrentUserEffectiveAccessDecisionsDto>>();
+    mockWorkspaces([staffWorkspace], { effectiveAccess });
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", {
+        name: /Training/i,
+      }),
+    ).not.toBeInTheDocument();
+
+    effectiveAccess.resolve({
+      data: effectiveAccessResponse(staffWorkspace, {
+        permissions: ["programs.read"],
+      }),
+    });
+
+    expect(
+      await screen.findByRole("link", { name: /Training/i }),
+    ).toHaveAttribute("href", "/app/training");
+  });
+
+  test("access-version conflict refetches workspace context without logging out", async () => {
+    mocks.pathname = "/app/training";
+    mockWorkspaces([staffWorkspace], {
+      effectiveAccessError: new ApiError({
+        category: "expected-version-conflict",
+        code: "WORKSPACE_MEMBERSHIP_ACCESS_VERSION_CONFLICT",
+        kind: "backend",
+        message: "stale access version",
+        status: 409,
+      }),
+    });
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.authSession.apiClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({ method: "GET", path: "/me/workspaces" }),
+      ),
+    );
+    expect(mocks.authSession.logout).not.toHaveBeenCalled();
   });
 
   test("responsive menu toggles accessibly and keyboard activation works", async () => {
@@ -383,12 +514,90 @@ function staffShellTree(
   );
 }
 
-function mockWorkspaces(items: readonly MyWorkspaceDto[]) {
-  mockWorkspaceData(items);
+function mockWorkspaces(
+  items: readonly MyWorkspaceDto[],
+  options: {
+    denied?: readonly PermissionKey[];
+    effectiveAccess?: Deferred<
+      ApiDataEnvelope<CurrentUserEffectiveAccessDecisionsDto>
+    >;
+    effectiveAccessError?: unknown;
+  } = {},
+) {
+  mockWorkspaceData(items, options);
 }
 
-function mockWorkspaceData(items: unknown) {
-  mocks.authSession.apiClient.request.mockResolvedValue({ data: items });
+function mockWorkspaceData(
+  items: unknown,
+  options: {
+    denied?: readonly PermissionKey[];
+    effectiveAccess?: Deferred<
+      ApiDataEnvelope<CurrentUserEffectiveAccessDecisionsDto>
+    >;
+    effectiveAccessError?: unknown;
+  } = {},
+) {
+  mocks.authSession.apiClient.request.mockImplementation(
+    (request: { body?: { requests?: unknown }; path: string }) => {
+      if (request.path === "/me/workspaces") {
+        return Promise.resolve({ data: items });
+      }
+
+      if (request.path.endsWith("/me/effective-access/decisions")) {
+        if (options.effectiveAccessError) {
+          return Promise.reject(options.effectiveAccessError);
+        }
+
+        if (options.effectiveAccess) {
+          return options.effectiveAccess.promise;
+        }
+
+        const workspaceItem = Array.isArray(items)
+          ? items.find((item): item is MyWorkspaceDto =>
+              Boolean(item && typeof item === "object" && "workspace" in item),
+            )
+          : staffWorkspace;
+        return Promise.resolve({
+          data: effectiveAccessResponse(workspaceItem ?? staffWorkspace, {
+            denied: options.denied,
+            requests: request.body?.requests,
+          }),
+        });
+      }
+
+      return Promise.reject(new Error(`Unexpected request ${request.path}`));
+    },
+  );
+}
+
+function effectiveAccessResponse(
+  workspaceItem: MyWorkspaceDto,
+  input: {
+    denied?: readonly PermissionKey[];
+    permissions?: readonly PermissionKey[];
+    requests?: unknown;
+  } = {},
+): CurrentUserEffectiveAccessDecisionsDto {
+  const requests = Array.isArray(input.requests)
+    ? (input.requests as { permission: PermissionKey; scope: "WORKSPACE" }[])
+    : (input.permissions ?? ["workspace.read"]).map((permission) => ({
+        permission,
+        scope: "WORKSPACE" as const,
+      }));
+  return {
+    accessVersion: workspaceItem.membership.accessVersion,
+    context: "USER",
+    decisions: requests.map((request) => {
+      const denied = input.denied?.includes(request.permission) ?? false;
+      return {
+        allowed: !denied,
+        effect: denied ? ("DENY" as const) : ("ALLOW" as const),
+        request,
+      };
+    }),
+    membershipId: workspaceItem.membership.id,
+    workspaceId: workspaceItem.workspace.id,
+  };
 }
 
 function user(firstName: string, lastName: string): SafeAuthUserDto {

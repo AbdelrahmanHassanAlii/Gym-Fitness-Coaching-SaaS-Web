@@ -18,6 +18,7 @@ import type { AuthorizationCacheContext } from "@/lib/server-state";
 export const staffShellPortal = "gym-staff" as const;
 
 export interface StaffWorkspaceOption {
+  accessVersion?: number;
   membershipId: MembershipId;
   roles: readonly GymStaffRole[];
   workspaceId: WorkspaceId;
@@ -119,6 +120,7 @@ export function selectStaffWorkspaces(
     }
 
     selected.push({
+      accessVersion: item.membership.accessVersion,
       membershipId: item.membership.id,
       roles,
       workspaceId: item.workspace.id,
@@ -178,16 +180,16 @@ export function createStaffNavigation({
       const permission = permissionByNavItem[id];
       const href = implementedNavItems[id];
       const status =
-        href !== undefined
-          ? "allowed"
-          : permission === undefined
+        permission === undefined
+          ? href === undefined
             ? "disabled"
-            : accessStatus(
-                evaluateAccess(
-                  accessFacts,
-                  accessRequirement(context, permission),
-                ),
-              );
+            : "allowed"
+          : accessStatus(
+              evaluateAccess(
+                accessFacts,
+                accessRequirement(context, permission),
+              ),
+            );
 
       return {
         description: labels[id].description,

@@ -9,6 +9,16 @@ export {
   isPermissionForbidden,
   shouldLogoutForAccessError,
 } from "./access-model";
+export {
+  currentUserEffectiveAccessFacts,
+  currentUserEffectiveAccessQueryKey,
+  erroredCurrentUserAccessFacts,
+  isAccessVersionConflict,
+  normalizeCurrentUserDecisionRequests,
+  requestCurrentUserEffectiveAccessDecisions,
+  unresolvedCurrentUserAccessFacts,
+  type CurrentUserDecisionRequest,
+} from "./current-user-decisions";
 export { AccessControlledButton, AccessGate } from "./AccessGate";
 export type {
   AccessDecision,
