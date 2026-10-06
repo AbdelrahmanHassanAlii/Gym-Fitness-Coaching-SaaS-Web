@@ -311,9 +311,13 @@ describe("staff shell", () => {
         name: /Training/i,
       }),
     ).toHaveAttribute("href", "/app/training");
+    expect(
+      screen.getByRole("link", {
+        name: /NutritionFoods, plans, daily logs, and analytics/i,
+      }),
+    ).toHaveAttribute("href", "/app/nutrition");
     for (const label of [
       "Staff",
-      "Nutrition",
       "Progress",
       "Documents",
       "Notifications",
@@ -323,6 +327,25 @@ describe("staff shell", () => {
         screen.queryByRole("link", { name: new RegExp(`^${label}\\b`, "i") }),
       ).not.toBeInTheDocument();
     }
+  });
+
+  test("nutrition navigation is allowed by any frozen read decision", async () => {
+    mockWorkspaces([staffWorkspace], {
+      denied: [
+        "nutrition.plans.read",
+        "adherence.read",
+        "analytics.nutrition.read",
+      ],
+    });
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", {
+        name: /NutritionFoods, plans, daily logs, and analytics/i,
+      }),
+    ).toHaveAttribute("href", "/app/nutrition");
   });
 
   test("requests current-user effective decisions for the active training route", async () => {
@@ -370,6 +393,50 @@ describe("staff shell", () => {
         ),
       ).size,
     );
+    expect(effectiveAccessCall?.body.requests.length).toBeLessThanOrEqual(25);
+  });
+
+  test("nutrition route requests the frozen read and action decisions within the Stage 19 batch limit", async () => {
+    mocks.pathname = "/app/nutrition";
+    mockWorkspaces([staffWorkspace]);
+
+    renderStaffShell();
+
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.authSession.apiClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "POST",
+          path: "/workspaces/workspace_a/me/effective-access/decisions",
+        }),
+      ),
+    );
+    const effectiveAccessCall = mocks.authSession.apiClient.request.mock.calls
+      .map((call) => call[0])
+      .find((options) =>
+        String(options.path).endsWith("/me/effective-access/decisions"),
+      );
+    const permissions = effectiveAccessCall?.body.requests.map(
+      (request: { permission: PermissionKey }) => request.permission,
+    );
+    expect(permissions).toEqual(
+      expect.arrayContaining([
+        "nutrition.plans.read",
+        "foods.read",
+        "adherence.read",
+        "analytics.nutrition.read",
+        "nutrition.plans.create",
+        "nutrition.plans.update",
+        "nutrition.plans.activate",
+        "nutrition.plans.complete",
+        "nutrition.plans.archive",
+        "foods.create",
+        "foods.update",
+        "foods.archive",
+      ]),
+    );
+    expect(permissions).not.toContain("health.food_allergies.read");
+    expect(effectiveAccessCall?.body.requests.length).toBe(17);
     expect(effectiveAccessCall?.body.requests.length).toBeLessThanOrEqual(25);
   });
 

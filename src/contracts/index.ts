@@ -8,6 +8,7 @@ export * from "./common/ids";
 export * from "./common/pagination";
 export * from "./files/contracts";
 export * from "./notifications/contracts";
+export * from "./nutrition/contracts";
 export * from "./permissions/contracts";
 export * from "./relationships/contracts";
 export * from "./support/contracts";

@@ -1,0 +1,140 @@
+.shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.eyebrow {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.toolbar,
+.tabs,
+.formGrid,
+.actions,
+.summaryGrid {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.toolbar label,
+.formGrid label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.toolbar select,
+.toolbar input,
+.formGrid input,
+.formGrid select,
+.formGrid textarea {
+  min-width: 11rem;
+}
+
+.tabs {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.65rem 0.75rem;
+}
+
+.tabActive {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.panel,
+.statePanel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.statePanel {
+  background: var(--color-surface-muted);
+}
+
+.split {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(16rem, 0.9fr) minmax(18rem, 1.2fr);
+}
+
+.list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+}
+
+.itemSelected {
+  border-color: var(--color-primary);
+}
+
+.meta {
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.875rem;
+  gap: 0.5rem;
+}
+
+.danger {
+  color: var(--color-danger);
+}
+
+.success {
+  color: var(--color-success);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.55rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 880px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar,
+  .formGrid,
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

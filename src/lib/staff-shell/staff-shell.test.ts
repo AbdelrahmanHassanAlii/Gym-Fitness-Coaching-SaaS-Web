@@ -104,6 +104,43 @@ describe("staff shell model", () => {
     });
   });
 
+  test("nutrition navigation uses any frozen read permission instead of plan-read only", () => {
+    const workspace = selectStaffWorkspaces([
+      myWorkspace({ roles: ["NUTRITIONIST"], workspaceId: workspaceA }),
+    ])[0];
+    const context = createStaffShellContext({
+      branchLabel: "All branches",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const nav = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [
+          decision("nutrition.plans.read", false, "DENY"),
+          decision("foods.read", true, "ALLOW"),
+          decision("adherence.read", false, "DENY"),
+          decision("analytics.nutrition.read", false, "DENY"),
+        ],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    });
+
+    expect(nav.find((item) => item.id === "nutrition")).toMatchObject({
+      href: "/app/nutrition",
+      permission: [
+        "nutrition.plans.read",
+        "foods.read",
+        "adherence.read",
+        "analytics.nutrition.read",
+      ],
+      status: "allowed",
+    });
+  });
+
   test("commercial route metadata uses billing access, not platform lead access", () => {
     const workspace = selectStaffWorkspaces([
       myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),

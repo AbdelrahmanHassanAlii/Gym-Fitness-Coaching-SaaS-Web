@@ -46,7 +46,7 @@ export interface StaffShellNavItem {
   description: string;
   href?: string;
   id: StaffShellNavItemId;
-  permission?: PermissionKey;
+  permission?: PermissionKey | readonly PermissionKey[];
   status: StaffShellAccessStatus;
   title: string;
 }
@@ -96,8 +96,16 @@ const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
     workspace: "workspace.read",
   };
 
+const nutritionNavPermissions = [
+  "nutrition.plans.read",
+  "foods.read",
+  "adherence.read",
+  "analytics.nutrition.read",
+] as const satisfies readonly PermissionKey[];
+
 const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
   leads: "/app/leads",
+  nutrition: "/app/nutrition",
   relationships: "/app/relationships",
   training: "/app/training",
   workspace: "/app/workspace",
@@ -177,25 +185,33 @@ export function createStaffNavigation({
   return [
     overview,
     ...futureNavItems.map((id) => {
-      const permission = permissionByNavItem[id];
       const href = implementedNavItems[id];
+      const permission = permissionByNavItem[id];
       const status =
-        permission === undefined
-          ? href === undefined
-            ? "disabled"
-            : "allowed"
-          : accessStatus(
-              evaluateAccess(
-                accessFacts,
-                accessRequirement(context, permission),
+        id === "nutrition"
+          ? aggregateAccessStatus(
+              nutritionNavPermissions.map((item) =>
+                accessStatus(
+                  evaluateAccess(accessFacts, accessRequirement(context, item)),
+                ),
               ),
-            );
+            )
+          : permission === undefined
+            ? href === undefined
+              ? "disabled"
+              : "allowed"
+            : accessStatus(
+                evaluateAccess(
+                  accessFacts,
+                  accessRequirement(context, permission),
+                ),
+              );
 
       return {
         description: labels[id].description,
         href,
         id,
-        permission,
+        permission: id === "nutrition" ? nutritionNavPermissions : permission,
         status,
         title: labels[id].title,
       } satisfies StaffShellNavItem;
@@ -235,4 +251,26 @@ function accessStatus(decision: AccessDecision): StaffShellAccessStatus {
   }
 
   return "unresolved";
+}
+
+function aggregateAccessStatus(
+  statuses: readonly StaffShellAccessStatus[],
+): StaffShellAccessStatus {
+  if (statuses.includes("allowed")) {
+    return "allowed";
+  }
+
+  if (statuses.includes("unavailable")) {
+    return "unavailable";
+  }
+
+  if (statuses.includes("unresolved")) {
+    return "unresolved";
+  }
+
+  if (statuses.includes("denied")) {
+    return "denied";
+  }
+
+  return "disabled";
 }

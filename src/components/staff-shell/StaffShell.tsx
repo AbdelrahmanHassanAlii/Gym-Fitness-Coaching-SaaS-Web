@@ -397,6 +397,10 @@ function currentUserDecisionRequestsForPath(
   const requests = new Map<string, CurrentUserDecisionRequest>();
   for (const permission of [
     "billing.subscription.read",
+    "adherence.read",
+    "analytics.nutrition.read",
+    "foods.read",
+    "nutrition.plans.read",
     "programs.read",
     "staff.read",
     "trainees.read",
@@ -460,6 +464,21 @@ function currentUserDecisionRequestsForPath(
       "workouts.day.skip",
       "workouts.read",
       "workouts.update",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/nutrition")) {
+    for (const permission of [
+      "foods.archive",
+      "foods.create",
+      "foods.update",
+      "nutrition.plans.activate",
+      "nutrition.plans.archive",
+      "nutrition.plans.complete",
+      "nutrition.plans.create",
+      "nutrition.plans.update",
     ] satisfies PermissionKey[]) {
       requests.set(permission, workspaceRequest(permission));
     }
