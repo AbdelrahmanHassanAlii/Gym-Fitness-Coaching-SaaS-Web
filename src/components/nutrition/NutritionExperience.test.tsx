@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   FoodId,
   MembershipId,
+  NutritionPlanDto,
   NutritionPlanId,
   NutritionPlanRevisionId,
   NutritionPlanStatus,
@@ -33,7 +34,7 @@ const relationshipId = "relationship_a" as RelationshipId;
 const planId = "nutrition_plan_a" as NutritionPlanId;
 const revisionId = "nutrition_revision_a" as NutritionPlanRevisionId;
 const foodId = "food_a" as FoodId;
-let currentPlanInput: Record<string, unknown> = {};
+let currentPlanInput: Partial<NutritionPlanDto> = {};
 
 const mocks = vi.hoisted(() => ({
   authSession: {
@@ -630,7 +631,7 @@ function food(input: Record<string, unknown> = {}) {
   };
 }
 
-function plan(input: Record<string, unknown> = {}) {
+function plan(input: Partial<NutritionPlanDto> = {}): NutritionPlanDto {
   return {
     currentRevisionId: revisionId,
     id: planId,
