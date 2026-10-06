@@ -428,19 +428,109 @@ describe("progress experience safety helpers", () => {
     ).not.toBe(key);
   });
 
-  test("compares authoritative state for safe ambiguous reconciliation", () => {
+  test("requires version evidence before config or daily ambiguity can reconcile as applied", () => {
     expect(
       progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
-        ["WATER", "STEPS"],
-        ["STEPS", "WATER"],
+        {
+          body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
+          enabledMetrics: ["WATER", "STEPS"],
+        },
+        { enabledMetrics: ["STEPS", "WATER"], version: 4 },
+      ),
+    ).toBe(false);
+    expect(
+      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+        {
+          body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
+          enabledMetrics: ["WATER", "STEPS"],
+        },
+        { enabledMetrics: ["STEPS", "WATER"], version: 5 },
       ),
     ).toBe(true);
     expect(
       progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
-        { values: { WATER: { ml: 2000 } } },
+        {
+          body: {
+            expectedVersion: 7,
+            values: { WATER: { ml: 2000 } },
+          },
+          localDate: "2026-05-01",
+        },
+        { values: { WATER: { ml: 2000 } }, version: 7 },
+      ),
+    ).toBe(false);
+    expect(
+      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+        {
+          body: {
+            expectedVersion: 7,
+            values: { WATER: { ml: 2000 } },
+          },
+          localDate: "2026-05-01",
+        },
         { values: { WATER: { ml: 2000 } }, version: 2 },
       ),
+    ).toBe(false);
+    expect(
+      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+        {
+          body: {
+            expectedVersion: 7,
+            values: { WATER: { ml: 2000 } },
+          },
+          localDate: "2026-05-01",
+        },
+        { values: { WATER: { ml: 2000 } }, version: 8 },
+      ),
     ).toBe(true);
+  });
+
+  test("keeps ambiguous create-without-version reconciliation conservative", () => {
+    expect(
+      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+        {
+          body: { enabledMetrics: ["WATER", "STEPS"] },
+          enabledMetrics: ["WATER", "STEPS"],
+        },
+        { enabledMetrics: ["STEPS", "WATER"], version: 1 },
+      ),
+    ).toBe(false);
+    expect(
+      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+        {
+          body: { values: { WATER: { ml: 2000 } } },
+          localDate: "2026-05-01",
+        },
+        { values: { WATER: { ml: 2000 } }, version: 1 },
+      ),
+    ).toBe(false);
+  });
+
+  test("classifies conflicting authoritative reconciliation as not applied", () => {
+    expect(
+      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+        {
+          body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
+          enabledMetrics: ["WATER", "STEPS"],
+        },
+        { enabledMetrics: ["NUTRITION"], version: 5 },
+      ),
+    ).toBe(false);
+    expect(
+      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+        {
+          body: {
+            expectedVersion: 7,
+            values: { WATER: { ml: 2000 } },
+          },
+          localDate: "2026-05-01",
+        },
+        { values: { WATER: { ml: 1500 } }, version: 8 },
+      ),
+    ).toBe(false);
+  });
+
+  test("compares versioned authoritative state for other safe ambiguous reconciliation", () => {
     expect(
       progressCommandRegistryForTests.comparisons.assignmentUpdateApplied(
         {

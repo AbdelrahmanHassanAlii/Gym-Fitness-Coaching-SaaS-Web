@@ -1000,10 +1000,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
       if (ambiguous) {
         const refreshed = await adherenceConfigQuery.refetch();
-        if (
-          refreshed.data &&
-          sameStringSet(refreshed.data.enabledMetrics, command.enabledMetrics)
-        ) {
+        if (refreshed.data && adherenceConfigApplied(command, refreshed.data)) {
           setStatusMessage(labels.status.saved);
           setError(null);
           return;
@@ -1039,10 +1036,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
       if (ambiguous) {
         const refreshed = await dailyTrackingQuery.refetch();
-        if (
-          refreshed.data &&
-          dailyTrackingApplied(command.body, refreshed.data)
-        ) {
+        if (refreshed.data && dailyTrackingApplied(command, refreshed.data)) {
           setStatusMessage(labels.status.saved);
           setError(null);
           return;
@@ -2078,6 +2072,17 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   );
 }
 
+function adherenceConfigApplied(
+  command: ConfigCommand,
+  latest: { enabledMetrics: readonly AdherenceMetricKey[]; version: number },
+) {
+  return (
+    command.body.expectedVersion !== undefined &&
+    latest.version > command.body.expectedVersion &&
+    sameStringSet(latest.enabledMetrics, command.enabledMetrics)
+  );
+}
+
 function measurementUpdateApplied(
   command: MeasurementUpdateCommand,
   latest: MeasurementDto,
@@ -2089,10 +2094,16 @@ function measurementUpdateApplied(
 }
 
 function dailyTrackingApplied(
-  body: ProgressDailyTrackingBodyDto,
+  command: DailyCommand,
   latest: { values: ProgressDailyTrackingBodyDto["values"]; version: number },
 ) {
-  return Object.entries(body.values).every(([metric, value]) => {
+  if (
+    command.body.expectedVersion === undefined ||
+    latest.version <= command.body.expectedVersion
+  ) {
+    return false;
+  }
+  return Object.entries(command.body.values).every(([metric, value]) => {
     const latestValue = latest.values[metric as keyof typeof latest.values];
     return stableStringify(latestValue) === stableStringify(value);
   });
@@ -2185,7 +2196,7 @@ export const progressCommandRegistryForTests = {
   retireCommandKey,
   stableBoundary: stableCommandBoundary,
   comparisons: {
-    adherenceConfigApplied: sameStringSet,
+    adherenceConfigApplied,
     assignmentUpdateApplied,
     dailyTrackingApplied,
     measurementUpdateApplied,
