@@ -316,13 +316,12 @@ describe("staff shell", () => {
         name: /NutritionFoods, plans, daily logs, and analytics/i,
       }),
     ).toHaveAttribute("href", "/app/nutrition");
-    for (const label of [
-      "Staff",
-      "Progress",
-      "Documents",
-      "Notifications",
-      "Analytics",
-    ]) {
+    expect(
+      screen.getByRole("link", {
+        name: /Progress & check-insMeasurements, adherence, health, notes, and check-ins/i,
+      }),
+    ).toHaveAttribute("href", "/app/progress");
+    for (const label of ["Staff", "Documents", "Notifications", "Analytics"]) {
       expect(
         screen.queryByRole("link", { name: new RegExp(`^${label}\\b`, "i") }),
       ).not.toBeInTheDocument();
