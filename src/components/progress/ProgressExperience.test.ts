@@ -6,6 +6,7 @@ import {
   reviewCheckIn,
 } from "@/lib/checkins";
 import { createMeasurement } from "@/lib/progress";
+import { messages } from "@/i18n/messages";
 import {
   localDateInWorkspaceTimeZone,
   prepareMeasurementCreateCommand,
@@ -428,9 +429,15 @@ describe("progress experience safety helpers", () => {
     ).not.toBe(key);
   });
 
-  test("requires version evidence before config or daily ambiguity can reconcile as applied", () => {
+  test("keeps config or daily ambiguity distinct from normal saved success", () => {
+    expect(messages.en.progress.status.stateMatchesIntent).not.toBe(
+      messages.en.progress.status.saved,
+    );
+    expect(messages.ar.progress.status.stateMatchesIntent).not.toBe(
+      messages.ar.progress.status.saved,
+    );
     expect(
-      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+      progressCommandRegistryForTests.comparisons.adherenceConfigStateMatchesIntent(
         {
           body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
           enabledMetrics: ["WATER", "STEPS"],
@@ -439,7 +446,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(false);
     expect(
-      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+      progressCommandRegistryForTests.comparisons.adherenceConfigStateMatchesIntent(
         {
           body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
           enabledMetrics: ["WATER", "STEPS"],
@@ -448,7 +455,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(true);
     expect(
-      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+      progressCommandRegistryForTests.comparisons.dailyTrackingStateMatchesIntent(
         {
           body: {
             expectedVersion: 7,
@@ -460,7 +467,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(false);
     expect(
-      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+      progressCommandRegistryForTests.comparisons.dailyTrackingStateMatchesIntent(
         {
           body: {
             expectedVersion: 7,
@@ -472,7 +479,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(false);
     expect(
-      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+      progressCommandRegistryForTests.comparisons.dailyTrackingStateMatchesIntent(
         {
           body: {
             expectedVersion: 7,
@@ -487,7 +494,7 @@ describe("progress experience safety helpers", () => {
 
   test("keeps ambiguous create-without-version reconciliation conservative", () => {
     expect(
-      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+      progressCommandRegistryForTests.comparisons.adherenceConfigStateMatchesIntent(
         {
           body: { enabledMetrics: ["WATER", "STEPS"] },
           enabledMetrics: ["WATER", "STEPS"],
@@ -496,7 +503,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(false);
     expect(
-      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+      progressCommandRegistryForTests.comparisons.dailyTrackingStateMatchesIntent(
         {
           body: { values: { WATER: { ml: 2000 } } },
           localDate: "2026-05-01",
@@ -508,7 +515,7 @@ describe("progress experience safety helpers", () => {
 
   test("classifies conflicting authoritative reconciliation as not applied", () => {
     expect(
-      progressCommandRegistryForTests.comparisons.adherenceConfigApplied(
+      progressCommandRegistryForTests.comparisons.adherenceConfigStateMatchesIntent(
         {
           body: { enabledMetrics: ["WATER", "STEPS"], expectedVersion: 4 },
           enabledMetrics: ["WATER", "STEPS"],
@@ -517,7 +524,7 @@ describe("progress experience safety helpers", () => {
       ),
     ).toBe(false);
     expect(
-      progressCommandRegistryForTests.comparisons.dailyTrackingApplied(
+      progressCommandRegistryForTests.comparisons.dailyTrackingStateMatchesIntent(
         {
           body: {
             expectedVersion: 7,

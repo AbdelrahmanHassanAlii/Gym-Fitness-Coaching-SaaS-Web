@@ -623,6 +623,8 @@ export const messages = {
         historical: "تصحيح تاريخي",
         normal: "تحديث اليوم أو أمس",
         saved: "تم حفظ التغيير.",
+        stateMatchesIntent:
+          "تطابق أحدث حالة من الخادم تغييراتك المقصودة، لكن نتيجة الطلب السابق غير مؤكدة.",
         unknownOutcome:
           "نتيجة الأمر غير مؤكدة. حدّث وراجع قبل أي إعادة محاولة.",
       },
@@ -1350,6 +1352,8 @@ export const messages = {
         historical: "Historical correction",
         normal: "Today/yesterday update",
         saved: "Change saved.",
+        stateMatchesIntent:
+          "Latest server state matches your intended changes, but the previous request outcome is unconfirmed.",
         unknownOutcome:
           "The command outcome is unknown. Refresh and review before retrying.",
       },

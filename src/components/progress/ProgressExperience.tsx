@@ -169,7 +169,12 @@ export type ProgressLabels = {
   >;
   title: string;
   status: Record<
-    "conflict" | "historical" | "normal" | "saved" | "unknownOutcome",
+    | "conflict"
+    | "historical"
+    | "normal"
+    | "saved"
+    | "stateMatchesIntent"
+    | "unknownOutcome",
     string
   >;
   values: Record<string, string>;
@@ -1000,8 +1005,11 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
       if (ambiguous) {
         const refreshed = await adherenceConfigQuery.refetch();
-        if (refreshed.data && adherenceConfigApplied(command, refreshed.data)) {
-          setStatusMessage(labels.status.saved);
+        if (
+          refreshed.data &&
+          adherenceConfigStateMatchesIntent(command, refreshed.data)
+        ) {
+          setStatusMessage(labels.status.stateMatchesIntent);
           setError(null);
           return;
         }
@@ -1036,8 +1044,11 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
       if (ambiguous) {
         const refreshed = await dailyTrackingQuery.refetch();
-        if (refreshed.data && dailyTrackingApplied(command, refreshed.data)) {
-          setStatusMessage(labels.status.saved);
+        if (
+          refreshed.data &&
+          dailyTrackingStateMatchesIntent(command, refreshed.data)
+        ) {
+          setStatusMessage(labels.status.stateMatchesIntent);
           setError(null);
           return;
         }
@@ -2072,7 +2083,7 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   );
 }
 
-function adherenceConfigApplied(
+function adherenceConfigStateMatchesIntent(
   command: ConfigCommand,
   latest: { enabledMetrics: readonly AdherenceMetricKey[]; version: number },
 ) {
@@ -2093,7 +2104,7 @@ function measurementUpdateApplied(
   );
 }
 
-function dailyTrackingApplied(
+function dailyTrackingStateMatchesIntent(
   command: DailyCommand,
   latest: { values: ProgressDailyTrackingBodyDto["values"]; version: number },
 ) {
@@ -2196,9 +2207,9 @@ export const progressCommandRegistryForTests = {
   retireCommandKey,
   stableBoundary: stableCommandBoundary,
   comparisons: {
-    adherenceConfigApplied,
+    adherenceConfigStateMatchesIntent,
     assignmentUpdateApplied,
-    dailyTrackingApplied,
+    dailyTrackingStateMatchesIntent,
     measurementUpdateApplied,
     noteArchiveApplied,
     noteUpdateApplied,
