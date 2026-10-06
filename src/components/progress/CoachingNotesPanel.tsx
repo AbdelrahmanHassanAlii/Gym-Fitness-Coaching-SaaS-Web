@@ -18,6 +18,9 @@ export function CoachingNotesPanel({
   onCreate,
   onUpdate,
   onVisibilityChange,
+  pendingArchiveId,
+  pendingCreate,
+  pendingUpdateId,
   readDecision,
   visibility,
 }: {
@@ -35,6 +38,9 @@ export function CoachingNotesPanel({
   onCreate: () => void;
   onUpdate: (note: CoachingNoteDto) => void;
   onVisibilityChange: (value: "PRIVATE" | "SHARED_WITH_TRAINEE") => void;
+  pendingArchiveId: string | null;
+  pendingCreate: boolean;
+  pendingUpdateId: string | null;
   readDecision: AccessDecision;
   visibility: "PRIVATE" | "SHARED_WITH_TRAINEE";
 }) {
@@ -88,7 +94,7 @@ export function CoachingNotesPanel({
             value={content}
           />
         </label>
-        <button disabled={!canCreate.allowed} type="submit">
+        <button disabled={!canCreate.allowed || pendingCreate} type="submit">
           {labels.actions.create}
         </button>
       </form>
@@ -99,20 +105,28 @@ export function CoachingNotesPanel({
             <strong>{note.category}</strong>
             <p>{note.content}</p>
             <div className={styles.meta}>
-              <span>{note.visibility}</span>
-              <span>{note.status}</span>
+              <span>{labels.values[note.visibility] ?? note.visibility}</span>
+              <span>{labels.values[note.status] ?? note.status}</span>
               <span>{note.version}</span>
             </div>
             <div className={styles.actions}>
               <button
-                disabled={!canUpdate.allowed || note.status !== "ACTIVE"}
+                disabled={
+                  !canUpdate.allowed ||
+                  note.status !== "ACTIVE" ||
+                  pendingUpdateId === note.id
+                }
                 onClick={() => onUpdate(note)}
                 type="button"
               >
                 {labels.actions.update}
               </button>
               <button
-                disabled={!canArchive.allowed || note.status !== "ACTIVE"}
+                disabled={
+                  !canArchive.allowed ||
+                  note.status !== "ACTIVE" ||
+                  pendingArchiveId === note.id
+                }
                 onClick={() => onArchive(note)}
                 type="button"
               >

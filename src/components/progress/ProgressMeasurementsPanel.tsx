@@ -21,6 +21,8 @@ export function ProgressMeasurementsPanel({
   onMeasurementNotesChange,
   onMeasurementValueChange,
   onUpdate,
+  pendingCreate,
+  pendingUpdate,
   readDecision,
 }: {
   analytics?: ProgressAnalyticsDto;
@@ -36,6 +38,8 @@ export function ProgressMeasurementsPanel({
   onMeasurementNotesChange: (value: string) => void;
   onMeasurementValueChange: (value: string) => void;
   onUpdate: () => void;
+  pendingCreate: boolean;
+  pendingUpdate: boolean;
   readDecision: AccessDecision;
 }) {
   if (!readDecision.allowed) {
@@ -91,13 +95,15 @@ export function ProgressMeasurementsPanel({
           />
         </label>
         <button
-          disabled={!canCreate.allowed || metrics.length === 0}
+          disabled={!canCreate.allowed || metrics.length === 0 || pendingCreate}
           type="submit"
         >
           {labels.actions.create}
         </button>
         <button
-          disabled={!canUpdate.allowed || measurements.length === 0}
+          disabled={
+            !canUpdate.allowed || measurements.length === 0 || pendingUpdate
+          }
           onClick={onUpdate}
           type="button"
         >
@@ -123,7 +129,9 @@ export function ProgressMeasurementsPanel({
               <tr key={measurement.id}>
                 <td>{measurement.metricDefinitionId}</td>
                 <td>{measurement.value}</td>
-                <td>{measurement.source}</td>
+                <td>
+                  {labels.values[measurement.source] ?? measurement.source}
+                </td>
                 <td>{measurement.version}</td>
               </tr>
             ))

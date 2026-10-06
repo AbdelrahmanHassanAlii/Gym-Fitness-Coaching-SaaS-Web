@@ -7,9 +7,13 @@ import type {
   AdherenceMetricKey,
   CheckInAssignmentDto,
   CheckInDto,
+  CheckInId,
   CheckInTemplateDto,
   CheckInTemplateId,
   CoachingNoteDto,
+  MeasurementBodyDto,
+  MeasurementDto,
+  MetricDefinitionId,
   MembershipId,
   PermissionKey,
   ProgressDailyTrackingBodyDto,
@@ -37,6 +41,8 @@ import {
   createCheckInTemplate,
   createCheckInTemplateRevision,
   endCheckInAssignment,
+  getCheckIn,
+  getCheckInTemplate,
   listCheckInAssignments,
   listCheckIns,
   listCheckInTemplates,
@@ -90,7 +96,9 @@ export type ProgressLabels = {
   capped: string;
   checkins: {
     assignments: string;
+    instanceDetail: string;
     instances: string;
+    templateDetail: string;
     templates: string;
     title: string;
   };
@@ -175,6 +183,13 @@ type CommandRecord = {
   logicalId: string;
 };
 
+type MeasurementCreateCommand = {
+  body: MeasurementBodyDto;
+  draftId: string;
+  logicalId: string;
+  params: { relationshipId: RelationshipId; workspaceId: WorkspaceId };
+};
+
 const progressReadPermissions = [
   "metric_definitions.read",
   "measurements.read",
@@ -212,6 +227,7 @@ const checkInPermissions = [
 ] as const satisfies readonly PermissionKey[];
 
 const commandRecords = new Map<string, CommandRecord>();
+const measurementCreateCommands = new Map<string, MeasurementCreateCommand>();
 const maxCommandRecords = 96;
 
 export function ProgressExperience({ labels }: { labels: ProgressLabels }) {
@@ -238,6 +254,11 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   const { accessFacts, shellContext, workspace } = useStaffWorkspaceContext();
   const [selectedRelationshipId, setSelectedRelationshipId] =
     useState<RelationshipId | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] =
+    useState<CheckInTemplateId | null>(null);
+  const [selectedCheckInId, setSelectedCheckInId] = useState<CheckInId | null>(
+    null,
+  );
   const [selectedTab, setSelectedTab] = useState<ProgressTab>("measurements");
   const today = workspace
     ? localDateInWorkspaceTimeZone(new Date(), workspace.workspaceTimezone)
@@ -683,6 +704,33 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
   const templates = templatesQuery.data?.data ?? [];
   const firstTemplate = templates[0] ?? null;
+  const activeTemplateId = selectedTemplateId ?? firstTemplate?.id ?? null;
+  const templateDetailQuery = useQuery({
+    enabled:
+      canQuery &&
+      membershipId !== undefined &&
+      activeTemplateId !== null &&
+      read.templates.allowed,
+    queryFn: ({ signal }) =>
+      getCheckInTemplate(apiClient, workspaceId!, activeTemplateId!, signal),
+    queryKey:
+      workspaceId === null ||
+      membershipId === undefined ||
+      activeTemplateId === null
+        ? ["progress", "checkin-template", "none"]
+        : checkInKeys.template(
+            workspaceId,
+            membershipId,
+            activeTemplateId,
+            generation,
+            accessContext,
+          ),
+    retry: false,
+  });
+  const templateDetail =
+    templateDetailQuery.data?.template.id === activeTemplateId
+      ? templateDetailQuery.data
+      : null;
 
   const assignmentsQuery = useQuery({
     enabled:
@@ -740,8 +788,48 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
     retry: false,
   });
   const checkIns = checkInsQuery.data?.data ?? [];
+  const activeCheckInId = selectedCheckInId ?? checkIns[0]?.id ?? null;
+  const checkInDetailQuery = useQuery({
+    enabled:
+      canQuery &&
+      membershipId !== undefined &&
+      relationshipId !== null &&
+      activeCheckInId !== null &&
+      read.checkins.allowed,
+    queryFn: ({ signal }) =>
+      getCheckIn(
+        apiClient,
+        workspaceId!,
+        relationshipId!,
+        activeCheckInId!,
+        signal,
+      ),
+    queryKey:
+      workspaceId === null ||
+      membershipId === undefined ||
+      relationshipId === null ||
+      activeCheckInId === null
+        ? ["progress", "checkin-detail", "none"]
+        : checkInKeys.checkin(
+            workspaceId,
+            membershipId,
+            relationshipId,
+            activeCheckInId,
+            generation,
+            accessContext,
+          ),
+    retry: false,
+  });
+  const checkInDetail =
+    checkInDetailQuery.data?.id === activeCheckInId
+      ? checkInDetailQuery.data
+      : null;
   const reviewableCheckIn =
-    checkIns.find((item) => item.status === "SUBMITTED") ?? checkIns[0] ?? null;
+    checkInDetail?.status === "SUBMITTED"
+      ? checkInDetail
+      : (checkIns.find((item) => item.status === "SUBMITTED") ??
+        checkIns[0] ??
+        null);
 
   const invalidateProgress = async () => {
     if (workspaceId) {
@@ -751,35 +839,36 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
     }
   };
 
-  const createMeasurementMutation = useMutation({
-    mutationFn: async () => {
-      if (!firstMetric || !workspaceId || !relationshipId) {
-        throw new Error("missing measurement context");
-      }
-      const body = {
-        measuredAt: new Date().toISOString(),
-        metricDefinitionId: firstMetric.id,
-        notes: measurementNotes || undefined,
-        source: "TRAINER" as const,
-        value: Number(measurementValue),
-      };
-      const logicalId = commandLogicalId({
-        accessContext,
-        body,
-        generation,
-        params: { relationshipId, workspaceId },
-        route: "POST /measurements",
-      });
-      return withIdempotentCommand(logicalId, (key) =>
-        createMeasurement(apiClient, workspaceId, relationshipId, body, key),
+  const createMeasurementMutation = useMutation<
+    MeasurementDto,
+    unknown,
+    MeasurementCreateCommand
+  >({
+    mutationFn: async (command) => {
+      return withIdempotentCommand(command.logicalId, (key) =>
+        createMeasurement(
+          apiClient,
+          command.params.workspaceId,
+          command.params.relationshipId,
+          command.body,
+          key,
+        ),
       );
     },
-    onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+    onError: async (mutationError, command) => {
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
+      if (!ambiguous && !isIdempotencyKeyReused(mutationError)) {
+        retireMeasurementCreateCommand(command);
+      }
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
-    onSuccess: async () => {
+    onSuccess: async (_measurement, command) => {
       await invalidateProgress();
+      retireMeasurementCreateCommand(command);
       setMeasurementValue("");
       setMeasurementNotes("");
       setStatusMessage(labels.status.saved);
@@ -805,8 +894,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -829,8 +922,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       return putAdherenceConfig(apiClient, workspaceId, relationshipId, body);
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -841,14 +938,16 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const putDailyMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (input: { today: string }) => {
       if (!workspaceId || !relationshipId)
         throw new Error("missing daily context");
       const body: ProgressDailyTrackingBodyDto = {
         ...(dailyTrackingQuery.data
           ? { expectedVersion: dailyTrackingQuery.data.version }
           : {}),
-        ...(isHistoricalDate(localDate, today) ? { reason: dailyReason } : {}),
+        ...(isHistoricalDate(localDate, input.today)
+          ? { reason: dailyReason }
+          : {}),
         values: {
           ...(dailyNutrition
             ? { NUTRITION: { adherencePercent: Number(dailyNutrition) } }
@@ -866,8 +965,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -889,8 +992,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       });
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -908,8 +1015,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         expectedVersion: note.version,
       }),
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -925,8 +1036,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         expectedVersion: note.version,
       }),
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -961,8 +1076,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1004,8 +1123,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1030,8 +1153,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1070,8 +1197,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1098,8 +1229,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         },
       ),
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1131,8 +1266,12 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       );
     },
     onError: async (mutationError) => {
-      await ambiguousMutationSideEffects(mutationError, invalidateProgress);
+      const ambiguous = await ambiguousMutationSideEffects(
+        mutationError,
+        invalidateProgress,
+      );
       setError(errorMessage(mutationError, labels));
+      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1192,8 +1331,10 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
       progressAnalyticsQuery.error,
       adherenceAnalyticsQuery.error,
       templatesQuery.error,
+      templateDetailQuery.error,
       assignmentsQuery.error,
       checkInsQuery.error,
+      checkInDetailQuery.error,
     ],
     labels,
   );
@@ -1220,9 +1361,10 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           <span>{labels.fields.relationship}</span>
           <select
             disabled={!relationshipRead.allowed || relationships.length === 0}
-            onChange={(event) =>
-              setSelectedRelationshipId(event.target.value as RelationshipId)
-            }
+            onChange={(event) => {
+              setSelectedRelationshipId(event.target.value as RelationshipId);
+              setSelectedCheckInId(null);
+            }}
             value={relationshipId ?? ""}
           >
             {relationships.length === 0 ? (
@@ -1298,10 +1440,24 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           measurementValue={measurementValue}
           measurements={measurements}
           metrics={metrics}
-          onCreate={() => createMeasurementMutation.mutate()}
+          onCreate={() => {
+            if (!firstMetric || !workspaceId || !relationshipId) return;
+            createMeasurementMutation.mutate(
+              prepareMeasurementCreateCommand({
+                accessContext,
+                metricDefinitionId: firstMetric.id,
+                notes: measurementNotes,
+                relationshipId,
+                value: Number(measurementValue),
+                workspaceId,
+              }),
+            );
+          }}
           onMeasurementNotesChange={setMeasurementNotes}
           onMeasurementValueChange={setMeasurementValue}
           onUpdate={() => updateMeasurementMutation.mutate()}
+          pendingCreate={createMeasurementMutation.isPending}
+          pendingUpdate={updateMeasurementMutation.isPending}
           readDecision={read.measurements}
         />
       ) : null}
@@ -1321,12 +1477,28 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           }
           labels={labels}
           localDate={localDate}
+          pendingConfig={putConfigMutation.isPending}
+          pendingDaily={putDailyMutation.isPending}
           onConfigSave={(enabledMetrics) =>
             putConfigMutation.mutate(enabledMetrics)
           }
           onDailyNutritionChange={setDailyNutrition}
           onDailyReasonChange={setDailyReason}
-          onDailySave={() => putDailyMutation.mutate()}
+          onDailySave={() => {
+            const submissionToday = localDateInWorkspaceTimeZone(
+              new Date(),
+              workspace.workspaceTimezone,
+            );
+            if (
+              isHistoricalDate(localDate, submissionToday) &&
+              dailyReason.trim().length === 0
+            ) {
+              setError(labels.errors.validation);
+              setStatusMessage(labels.status.historical);
+              return;
+            }
+            putDailyMutation.mutate({ today: submissionToday });
+          }}
           onDailyStepsChange={setDailySteps}
           onDailyWaterChange={setDailyWater}
           readDecision={read.adherence}
@@ -1379,6 +1551,9 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           onCreate={() => createNoteMutation.mutate()}
           onUpdate={(note) => updateNoteMutation.mutate(note)}
           onVisibilityChange={setNoteVisibility}
+          pendingArchiveId={archiveNoteMutation.variables?.id ?? null}
+          pendingCreate={createNoteMutation.isPending}
+          pendingUpdateId={updateNoteMutation.variables?.id ?? null}
           readDecision={read.notes}
           visibility={noteVisibility}
         />
@@ -1395,10 +1570,13 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           canCreateTemplate={actions.templateCreate}
           canUpdateTemplate={actions.templateUpdate}
           checkins={checkIns}
+          checkInDetail={checkInDetail}
           isLoading={
             templatesQuery.isLoading ||
             assignmentsQuery.isLoading ||
-            checkInsQuery.isLoading
+            checkInsQuery.isLoading ||
+            templateDetailQuery.isLoading ||
+            checkInDetailQuery.isLoading
           }
           labels={labels}
           onArchiveTemplate={(template) => {
@@ -1416,6 +1594,8 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
             }
           }}
           onReview={(checkin) => reviewCheckInMutation.mutate(checkin)}
+          onSelectCheckIn={setSelectedCheckInId}
+          onSelectTemplate={setSelectedTemplateId}
           onReviseTemplate={(template) =>
             reviseTemplateMutation.mutate(template)
           }
@@ -1427,8 +1607,24 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           readCheckInsDecision={read.checkins}
           readTemplatesDecision={read.templates}
           reviewComment={reviewComment}
+          selectedCheckInId={activeCheckInId}
+          selectedTemplateId={activeTemplateId}
+          templateDetail={templateDetail}
           templateName={templateName}
           templates={templates}
+          pendingAssignmentCreate={createAssignmentMutation.isPending}
+          pendingAssignmentEndId={endAssignmentMutation.variables?.id ?? null}
+          pendingAssignmentUpdateId={
+            updateAssignmentMutation.variables?.id ?? null
+          }
+          pendingReviewId={reviewCheckInMutation.variables?.id ?? null}
+          pendingTemplateArchiveId={
+            archiveTemplateMutation.variables?.id ?? null
+          }
+          pendingTemplateCreate={createTemplateMutation.isPending}
+          pendingTemplateRevisionId={
+            reviseTemplateMutation.variables?.id ?? null
+          }
           onReviewCommentChange={setReviewComment}
           reviewableCheckIn={reviewableCheckIn}
           firstTemplate={firstTemplate}
@@ -1574,10 +1770,65 @@ function isHistoricalDate(localDate: string, today: string): boolean {
   return localDate < previousLocalDate(today);
 }
 
+export function prepareMeasurementCreateCommand(input: {
+  accessContext: AuthorizationCacheContext;
+  metricDefinitionId: MetricDefinitionId;
+  notes: string;
+  relationshipId: RelationshipId;
+  value: number;
+  workspaceId: WorkspaceId;
+}): MeasurementCreateCommand {
+  const draft = {
+    accessContext: input.accessContext,
+    metricDefinitionId: input.metricDefinitionId,
+    notes: input.notes || undefined,
+    params: {
+      relationshipId: input.relationshipId,
+      workspaceId: input.workspaceId,
+    },
+    source: "TRAINER",
+    value: input.value,
+  };
+  const draftId = stableStringify(draft);
+  const existing = measurementCreateCommands.get(draftId);
+  if (existing) return existing;
+  const body: MeasurementBodyDto = {
+    measuredAt: new Date().toISOString(),
+    metricDefinitionId: input.metricDefinitionId,
+    notes: input.notes || undefined,
+    source: "TRAINER",
+    value: input.value,
+  };
+  const command: MeasurementCreateCommand = {
+    body,
+    draftId,
+    logicalId: commandLogicalId({
+      accessContext: input.accessContext,
+      body,
+      params: {
+        relationshipId: input.relationshipId,
+        workspaceId: input.workspaceId,
+      },
+      route: "POST /measurements",
+    }),
+    params: {
+      relationshipId: input.relationshipId,
+      workspaceId: input.workspaceId,
+    },
+  };
+  measurementCreateCommands.set(draftId, command);
+  return command;
+}
+
+function retireMeasurementCreateCommand(command: MeasurementCreateCommand) {
+  measurementCreateCommands.delete(command.draftId);
+  retireCommandKey(command.logicalId);
+}
+
 function commandLogicalId(input: {
   accessContext: AuthorizationCacheContext;
   body: unknown;
-  generation: number;
+  generation?: number;
   params: unknown;
   route: string;
 }): string {
@@ -1630,17 +1881,22 @@ function retireCommandKey(logicalId: string) {
 export const progressCommandRegistryForTests = {
   commandKey,
   markCommandAmbiguous,
-  reset: () => commandRecords.clear(),
+  reset: () => {
+    commandRecords.clear();
+    measurementCreateCommands.clear();
+  },
   retireCommandKey,
 };
 
 async function ambiguousMutationSideEffects(
   error: unknown,
   invalidate: () => Promise<void>,
-) {
+): Promise<boolean> {
   if (isAmbiguous(error)) {
     await invalidate();
+    return true;
   }
+  return false;
 }
 
 function firstQueryError(

@@ -1,6 +1,7 @@
 import type {
   CheckInAssignmentDto,
   CheckInDto,
+  CheckInTemplateDetailDto,
   CheckInTemplateDto,
   CheckInTemplateId,
 } from "@/contracts";
@@ -17,6 +18,7 @@ export function CheckInsPanel({
   canReview,
   canUpdateAssignment,
   canUpdateTemplate,
+  checkInDetail,
   checkins,
   firstTemplate,
   isLoading,
@@ -28,13 +30,25 @@ export function CheckInsPanel({
   onReview,
   onReviewCommentChange,
   onReviseTemplate,
+  onSelectCheckIn,
+  onSelectTemplate,
   onTemplateNameChange,
   onUpdateAssignment,
+  pendingAssignmentCreate,
+  pendingAssignmentEndId,
+  pendingAssignmentUpdateId,
+  pendingReviewId,
+  pendingTemplateArchiveId,
+  pendingTemplateCreate,
+  pendingTemplateRevisionId,
   readAssignmentsDecision,
   readCheckInsDecision,
   readTemplatesDecision,
   reviewComment,
   reviewableCheckIn,
+  selectedCheckInId,
+  selectedTemplateId,
+  templateDetail,
   templateName,
   templates,
 }: {
@@ -46,6 +60,7 @@ export function CheckInsPanel({
   canReview: AccessDecision;
   canUpdateAssignment: AccessDecision;
   canUpdateTemplate: AccessDecision;
+  checkInDetail: CheckInDto | null;
   checkins: readonly CheckInDto[];
   firstAssignment: CheckInAssignmentDto | null;
   firstTemplate: CheckInTemplateDto | null;
@@ -58,13 +73,25 @@ export function CheckInsPanel({
   onReview: (checkin: CheckInDto) => void;
   onReviewCommentChange: (value: string) => void;
   onReviseTemplate: (template: CheckInTemplateDto) => void;
+  onSelectCheckIn: (checkinId: CheckInDto["id"]) => void;
+  onSelectTemplate: (templateId: CheckInTemplateId) => void;
   onTemplateNameChange: (value: string) => void;
   onUpdateAssignment: (assignment: CheckInAssignmentDto) => void;
+  pendingAssignmentCreate: boolean;
+  pendingAssignmentEndId: string | null;
+  pendingAssignmentUpdateId: string | null;
+  pendingReviewId: string | null;
+  pendingTemplateArchiveId: string | null;
+  pendingTemplateCreate: boolean;
+  pendingTemplateRevisionId: string | null;
   readAssignmentsDecision: AccessDecision;
   readCheckInsDecision: AccessDecision;
   readTemplatesDecision: AccessDecision;
   reviewComment: string;
   reviewableCheckIn: CheckInDto | null;
+  selectedCheckInId: CheckInDto["id"] | null;
+  selectedTemplateId: CheckInTemplateId | null;
+  templateDetail: CheckInTemplateDetailDto | null;
   templateName: string;
   templates: readonly CheckInTemplateDto[];
 }) {
@@ -94,7 +121,10 @@ export function CheckInsPanel({
                     value={templateName}
                   />
                 </label>
-                <button disabled={!canCreateTemplate.allowed} type="submit">
+                <button
+                  disabled={!canCreateTemplate.allowed || pendingTemplateCreate}
+                  type="submit"
+                >
                   {labels.actions.create}
                 </button>
               </form>
@@ -102,13 +132,23 @@ export function CheckInsPanel({
                 {templates.map((template) => (
                   <article className={styles.item} key={template.id}>
                     <strong>{template.name}</strong>
-                    <span>{template.status}</span>
+                    <span>
+                      {labels.values[template.status] ?? template.status}
+                    </span>
                     <span>{template.version}</span>
                     <div className={styles.actions}>
                       <button
+                        disabled={selectedTemplateId === template.id}
+                        onClick={() => onSelectTemplate(template.id)}
+                        type="button"
+                      >
+                        {labels.actions.select}
+                      </button>
+                      <button
                         disabled={
                           !canUpdateTemplate.allowed ||
-                          template.status !== "ACTIVE"
+                          template.status !== "ACTIVE" ||
+                          pendingTemplateRevisionId === template.id
                         }
                         onClick={() => onReviseTemplate(template)}
                         type="button"
@@ -118,7 +158,8 @@ export function CheckInsPanel({
                       <button
                         disabled={
                           !canArchiveTemplate.allowed ||
-                          template.status !== "ACTIVE"
+                          template.status !== "ACTIVE" ||
+                          pendingTemplateArchiveId === template.id
                         }
                         onClick={() => onArchiveTemplate(template)}
                         type="button"
@@ -129,6 +170,30 @@ export function CheckInsPanel({
                   </article>
                 ))}
               </ListOrEmpty>
+              {templateDetail ? (
+                <article className={styles.detail}>
+                  <h4>{labels.checkins.templateDetail}</h4>
+                  <strong>{templateDetail.template.name}</strong>
+                  <span>
+                    {labels.values[templateDetail.template.status] ??
+                      templateDetail.template.status}
+                  </span>
+                  <span>
+                    {labels.fields.expectedVersion}:{" "}
+                    {templateDetail.template.version}
+                  </span>
+                  {templateDetail.revision ? (
+                    <div className={styles.list}>
+                      {templateDetail.revision.fields.map((field) => (
+                        <span key={field.fieldKey}>
+                          {field.label} ·{" "}
+                          {labels.values[field.type] ?? field.type}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ) : null}
             </>
           ) : (
             <p>{labels.errors.denied}</p>
@@ -140,7 +205,11 @@ export function CheckInsPanel({
           {readAssignmentsDecision.allowed ? (
             <>
               <button
-                disabled={!canAssign.allowed || firstTemplate === null}
+                disabled={
+                  !canAssign.allowed ||
+                  firstTemplate === null ||
+                  pendingAssignmentCreate
+                }
                 onClick={() =>
                   firstTemplate && onCreateAssignment(firstTemplate.id)
                 }
@@ -152,12 +221,18 @@ export function CheckInsPanel({
                 {assignments.map((assignment) => (
                   <article className={styles.item} key={assignment.id}>
                     <strong>{assignment.templateId}</strong>
-                    <span>{assignment.active ? "ACTIVE" : "ENDED"}</span>
+                    <span>
+                      {assignment.active
+                        ? labels.values.ACTIVE
+                        : labels.values.ENDED}
+                    </span>
                     <span>{assignment.version}</span>
                     <div className={styles.actions}>
                       <button
                         disabled={
-                          !canUpdateAssignment.allowed || !assignment.active
+                          !canUpdateAssignment.allowed ||
+                          !assignment.active ||
+                          pendingAssignmentUpdateId === assignment.id
                         }
                         onClick={() => onUpdateAssignment(assignment)}
                         type="button"
@@ -166,7 +241,9 @@ export function CheckInsPanel({
                       </button>
                       <button
                         disabled={
-                          !canEndAssignment.allowed || !assignment.active
+                          !canEndAssignment.allowed ||
+                          !assignment.active ||
+                          pendingAssignmentEndId === assignment.id
                         }
                         onClick={() => onEndAssignment(assignment)}
                         type="button"
@@ -209,7 +286,8 @@ export function CheckInsPanel({
                 disabled={
                   !canReview.allowed ||
                   reviewableCheckIn === null ||
-                  reviewableCheckIn.status !== "SUBMITTED"
+                  reviewableCheckIn.status !== "SUBMITTED" ||
+                  pendingReviewId === reviewableCheckIn.id
                 }
                 type="submit"
               >
@@ -220,11 +298,40 @@ export function CheckInsPanel({
               {checkins.map((checkin) => (
                 <article className={styles.item} key={checkin.id}>
                   <strong>{checkin.periodKey}</strong>
-                  <span>{checkin.status}</span>
+                  <span>{labels.values[checkin.status] ?? checkin.status}</span>
                   <span>{checkin.version}</span>
+                  <button
+                    disabled={selectedCheckInId === checkin.id}
+                    onClick={() => onSelectCheckIn(checkin.id)}
+                    type="button"
+                  >
+                    {labels.actions.select}
+                  </button>
                 </article>
               ))}
             </ListOrEmpty>
+            {checkInDetail ? (
+              <article className={styles.detail}>
+                <h4>{labels.checkins.instanceDetail}</h4>
+                <strong>{checkInDetail.periodKey}</strong>
+                <span>
+                  {labels.values[checkInDetail.status] ?? checkInDetail.status}
+                </span>
+                <span>
+                  {labels.fields.expectedVersion}: {checkInDetail.version}
+                </span>
+                <div className={styles.list}>
+                  {checkInDetail.responses.map((response) => (
+                    <span key={response.fieldKey}>
+                      {response.fieldKey}: {String(response.value ?? "-")}
+                    </span>
+                  ))}
+                </div>
+                {checkInDetail.trainerFeedback ? (
+                  <p>{checkInDetail.trainerFeedback.comment}</p>
+                ) : null}
+              </article>
+            ) : null}
           </>
         ) : (
           <p>{labels.errors.denied}</p>

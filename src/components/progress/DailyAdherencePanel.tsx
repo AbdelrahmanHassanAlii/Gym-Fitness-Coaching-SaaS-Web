@@ -27,6 +27,8 @@ export function DailyAdherencePanel({
   onDailySave,
   onDailyStepsChange,
   onDailyWaterChange,
+  pendingConfig,
+  pendingDaily,
   readDecision,
   saveConfigDecision,
   saveDailyDecision,
@@ -48,6 +50,8 @@ export function DailyAdherencePanel({
   onDailySave: () => void;
   onDailyStepsChange: (value: string) => void;
   onDailyWaterChange: (value: string) => void;
+  pendingConfig: boolean;
+  pendingDaily: boolean;
   readDecision: AccessDecision;
   saveConfigDecision: AccessDecision;
   saveDailyDecision: AccessDecision;
@@ -94,7 +98,10 @@ export function DailyAdherencePanel({
         <span>
           {labels.fields.expectedVersion}: {config?.version ?? "-"}
         </span>
-        <button disabled={!saveConfigDecision.allowed} type="submit">
+        <button
+          disabled={!saveConfigDecision.allowed || pendingConfig}
+          type="submit"
+        >
           {labels.actions.save}
         </button>
       </form>
@@ -145,7 +152,10 @@ export function DailyAdherencePanel({
         <span>
           {labels.fields.expectedVersion}: {daily?.version ?? "-"}
         </span>
-        <button disabled={!saveDailyDecision.allowed} type="submit">
+        <button
+          disabled={!saveDailyDecision.allowed || pendingDaily}
+          type="submit"
+        >
           {labels.actions.save}
         </button>
       </form>
