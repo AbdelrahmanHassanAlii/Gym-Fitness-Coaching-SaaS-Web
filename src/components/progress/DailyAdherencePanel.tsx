@@ -81,6 +81,7 @@ export function DailyAdherencePanel({
         className={styles.formGrid}
         onSubmit={(event) => {
           event.preventDefault();
+          if (!saveConfigDecision.allowed || pendingConfig) return;
           onConfigSave(["NUTRITION", "WATER", "STEPS"]);
         }}
       >
@@ -109,6 +110,7 @@ export function DailyAdherencePanel({
         className={styles.formGrid}
         onSubmit={(event) => {
           event.preventDefault();
+          if (!saveDailyDecision.allowed || pendingDaily) return;
           onDailySave();
         }}
       >

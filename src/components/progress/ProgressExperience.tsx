@@ -18,6 +18,7 @@ import type {
   PermissionKey,
   ProgressDailyTrackingBodyDto,
   RelationshipId,
+  UserId,
   WorkspaceId,
 } from "@/contracts";
 import { createIdempotencyKey, isApiError } from "@/lib/api";
@@ -183,11 +184,64 @@ type CommandRecord = {
   logicalId: string;
 };
 
+type StableCommandBoundary = {
+  accessContext: AuthorizationCacheContext;
+  membershipId: MembershipId;
+  principalId: UserId;
+  workspaceId: WorkspaceId;
+};
+
 type MeasurementCreateCommand = {
   body: MeasurementBodyDto;
   draftId: string;
   logicalId: string;
   params: { relationshipId: RelationshipId; workspaceId: WorkspaceId };
+};
+
+type ConfigCommand = {
+  body: AdherenceConfigBodyDto;
+  enabledMetrics: AdherenceMetricKey[];
+};
+
+type DailyCommand = {
+  body: ProgressDailyTrackingBodyDto;
+  localDate: string;
+};
+
+type MeasurementUpdateCommand = {
+  body: { expectedVersion: number; value: number };
+  measurement: MeasurementDto;
+};
+
+type NoteCreateCommand = {
+  body: {
+    category: string;
+    content: string;
+    sensitive: boolean;
+    visibility: "PRIVATE" | "SHARED_WITH_TRAINEE";
+  };
+};
+
+type NoteUpdateCommand = {
+  body: { content: string; expectedVersion: number };
+  note: CoachingNoteDto;
+};
+
+type NoteArchiveCommand = {
+  body: { expectedVersion: number };
+  note: CoachingNoteDto;
+};
+
+type AssignmentUpdateCommand = {
+  assignment: CheckInAssignmentDto;
+  body: {
+    expectedVersion: number;
+    recurrence: {
+      dayOfWeek: number;
+      frequency: "WEEKLY";
+      timezone: string;
+    };
+  };
 };
 
 const progressReadPermissions = [
@@ -283,6 +337,17 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   const workspaceId = workspace?.workspaceId ?? null;
   const membershipId = workspace?.membershipId;
   const accessContext = shellContext?.accessContext ?? "user";
+  const principalId =
+    state.status === "authenticated" ? state.user.id : undefined;
+  const commandBoundary =
+    workspaceId !== null && membershipId !== undefined && principalId
+      ? {
+          accessContext,
+          membershipId,
+          principalId,
+          workspaceId,
+        }
+      : null;
   const canQuery = state.status === "authenticated" && workspaceId !== null;
   const relationshipRead = actionDecision({
     accessContext,
@@ -878,28 +943,36 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const updateMeasurementMutation = useMutation({
-    mutationFn: () => {
-      if (!firstMeasurement || !workspaceId || !relationshipId) {
+    mutationFn: (command: MeasurementUpdateCommand) => {
+      if (!workspaceId || !relationshipId) {
         throw new Error("missing measurement context");
       }
       return updateMeasurement(
         apiClient,
         workspaceId,
         relationshipId,
-        firstMeasurement.id,
-        {
-          expectedVersion: firstMeasurement.version,
-          value: Number(measurementValue),
-        },
+        command.measurement.id,
+        command.body,
       );
     },
-    onError: async (mutationError) => {
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await measurementsQuery.refetch();
+        const latest = refreshed.data?.data.find(
+          (item) => item.id === command.measurement.id,
+        );
+        if (latest && measurementUpdateApplied(command, latest)) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -910,24 +983,34 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const putConfigMutation = useMutation({
-    mutationFn: (enabledMetrics: AdherenceMetricKey[]) => {
+    mutationFn: (command: ConfigCommand) => {
       if (!workspaceId || !relationshipId)
         throw new Error("missing adherence context");
-      const body: AdherenceConfigBodyDto = {
-        enabledMetrics,
-        ...(adherenceConfigQuery.data
-          ? { expectedVersion: adherenceConfigQuery.data.version }
-          : {}),
-      };
-      return putAdherenceConfig(apiClient, workspaceId, relationshipId, body);
+      return putAdherenceConfig(
+        apiClient,
+        workspaceId,
+        relationshipId,
+        command.body,
+      );
     },
-    onError: async (mutationError) => {
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await adherenceConfigQuery.refetch();
+        if (
+          refreshed.data &&
+          sameStringSet(refreshed.data.enabledMetrics, command.enabledMetrics)
+        ) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -938,39 +1021,35 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const putDailyMutation = useMutation({
-    mutationFn: (input: { today: string }) => {
+    mutationFn: (command: DailyCommand) => {
       if (!workspaceId || !relationshipId)
         throw new Error("missing daily context");
-      const body: ProgressDailyTrackingBodyDto = {
-        ...(dailyTrackingQuery.data
-          ? { expectedVersion: dailyTrackingQuery.data.version }
-          : {}),
-        ...(isHistoricalDate(localDate, input.today)
-          ? { reason: dailyReason }
-          : {}),
-        values: {
-          ...(dailyNutrition
-            ? { NUTRITION: { adherencePercent: Number(dailyNutrition) } }
-            : {}),
-          ...(dailySteps ? { STEPS: { count: Number(dailySteps) } } : {}),
-          ...(dailyWater ? { WATER: { ml: Number(dailyWater) } } : {}),
-        },
-      };
       return putDailyTracking(
         apiClient,
         workspaceId,
         relationshipId,
-        localDate,
-        body,
+        command.localDate,
+        command.body,
       );
     },
-    onError: async (mutationError) => {
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await dailyTrackingQuery.refetch();
+        if (
+          refreshed.data &&
+          dailyTrackingApplied(command.body, refreshed.data)
+        ) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -981,15 +1060,10 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const createNoteMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (command: NoteCreateCommand) => {
       if (!workspaceId || !relationshipId)
         throw new Error("missing note context");
-      return createNote(apiClient, workspaceId, relationshipId, {
-        category: noteCategory,
-        content: noteContent,
-        sensitive: noteVisibility === "PRIVATE",
-        visibility: noteVisibility,
-      });
+      return createNote(apiClient, workspaceId, relationshipId, command.body);
     },
     onError: async (mutationError) => {
       const ambiguous = await ambiguousMutationSideEffects(
@@ -1009,18 +1083,32 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const updateNoteMutation = useMutation({
-    mutationFn: (note: CoachingNoteDto) =>
-      updateNote(apiClient, workspaceId!, relationshipId!, note.id, {
-        content: noteContent || note.content,
-        expectedVersion: note.version,
-      }),
-    onError: async (mutationError) => {
+    mutationFn: (command: NoteUpdateCommand) =>
+      updateNote(
+        apiClient,
+        workspaceId!,
+        relationshipId!,
+        command.note.id,
+        command.body,
+      ),
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await notesQuery.refetch();
+        const latest = refreshed.data?.data.find(
+          (item) => item.id === command.note.id,
+        );
+        if (latest && noteUpdateApplied(command, latest)) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1031,17 +1119,32 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const archiveNoteMutation = useMutation({
-    mutationFn: (note: CoachingNoteDto) =>
-      archiveNote(apiClient, workspaceId!, relationshipId!, note.id, {
-        expectedVersion: note.version,
-      }),
-    onError: async (mutationError) => {
+    mutationFn: (command: NoteArchiveCommand) =>
+      archiveNote(
+        apiClient,
+        workspaceId!,
+        relationshipId!,
+        command.note.id,
+        command.body,
+      ),
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await notesQuery.refetch();
+        const latest = refreshed.data?.data.find(
+          (item) => item.id === command.note.id,
+        );
+        if (latest && noteArchiveApplied(command, latest)) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1053,6 +1156,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
 
   const createTemplateMutation = useMutation({
     mutationFn: () => {
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = {
         fields: [
           {
@@ -1065,9 +1169,8 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         name: templateName,
       };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { workspaceId },
         route: "POST /checkin-templates",
       });
@@ -1094,6 +1197,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
 
   const reviseTemplateMutation = useMutation({
     mutationFn: (template: CheckInTemplateDto) => {
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = {
         expectedVersion: template.version,
         fields: [
@@ -1106,9 +1210,8 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         ],
       };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { templateId: template.id, workspaceId },
         route: "POST /checkin-templates/:id/revisions",
       });
@@ -1140,11 +1243,11 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
 
   const archiveTemplateMutation = useMutation({
     mutationFn: (template: CheckInTemplateDto) => {
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = { expectedVersion: template.version };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { templateId: template.id, workspaceId },
         route: "POST /checkin-templates/:id/archive",
       });
@@ -1171,6 +1274,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   const createAssignmentMutation = useMutation({
     mutationFn: (templateId: CheckInTemplateId) => {
       if (!relationshipId) throw new Error("missing relationship");
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = {
         recurrence: {
           dayOfWeek: 1,
@@ -1180,9 +1284,8 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
         templateId,
       };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { relationshipId, workspaceId },
         route: "POST /checkin-assignments",
       });
@@ -1213,28 +1316,32 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
   });
 
   const updateAssignmentMutation = useMutation({
-    mutationFn: (assignment: CheckInAssignmentDto) =>
+    mutationFn: (command: AssignmentUpdateCommand) =>
       updateCheckInAssignment(
         apiClient,
         workspaceId!,
         relationshipId!,
-        assignment.id,
-        {
-          expectedVersion: assignment.version,
-          recurrence: {
-            dayOfWeek: assignment.recurrence.dayOfWeek,
-            frequency: "WEEKLY",
-            timezone: workspace!.workspaceTimezone,
-          },
-        },
+        command.assignment.id,
+        command.body,
       ),
-    onError: async (mutationError) => {
+    onError: async (mutationError, command) => {
       const ambiguous = await ambiguousMutationSideEffects(
         mutationError,
         invalidateProgress,
       );
+      if (ambiguous) {
+        const refreshed = await assignmentsQuery.refetch();
+        const latest = refreshed.data?.data.find(
+          (item) => item.id === command.assignment.id,
+        );
+        if (latest && assignmentUpdateApplied(command, latest)) {
+          setStatusMessage(labels.status.saved);
+          setError(null);
+          return;
+        }
+        setStatusMessage(labels.errors.ambiguous);
+      }
       setError(errorMessage(mutationError, labels));
-      if (ambiguous) setStatusMessage(labels.errors.ambiguous);
     },
     onSuccess: async () => {
       await invalidateProgress();
@@ -1246,11 +1353,11 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
 
   const endAssignmentMutation = useMutation({
     mutationFn: (assignment: CheckInAssignmentDto) => {
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = { expectedVersion: assignment.version };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { assignmentId: assignment.id, relationshipId, workspaceId },
         route: "POST /checkin-assignments/:id/end",
       });
@@ -1283,14 +1390,14 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
 
   const reviewCheckInMutation = useMutation({
     mutationFn: (checkin: CheckInDto) => {
+      if (!commandBoundary) throw new Error("missing command boundary");
       const body = {
         expectedVersion: checkin.version,
         trainerFeedback: { comment: reviewComment },
       };
       const logicalId = commandLogicalId({
-        accessContext,
         body,
-        generation,
+        boundary: commandBoundary,
         params: { checkinId: checkin.id, relationshipId, workspaceId },
         route: "POST /checkins/:id/review",
       });
@@ -1441,12 +1548,22 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           measurements={measurements}
           metrics={metrics}
           onCreate={() => {
-            if (!firstMetric || !workspaceId || !relationshipId) return;
+            if (
+              createMeasurementMutation.isPending ||
+              !firstMetric ||
+              !workspaceId ||
+              !relationshipId ||
+              !commandBoundary
+            ) {
+              return;
+            }
             createMeasurementMutation.mutate(
               prepareMeasurementCreateCommand({
                 accessContext,
+                membershipId: commandBoundary.membershipId,
                 metricDefinitionId: firstMetric.id,
                 notes: measurementNotes,
+                principalId: commandBoundary.principalId,
                 relationshipId,
                 value: Number(measurementValue),
                 workspaceId,
@@ -1455,7 +1572,23 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           }}
           onMeasurementNotesChange={setMeasurementNotes}
           onMeasurementValueChange={setMeasurementValue}
-          onUpdate={() => updateMeasurementMutation.mutate()}
+          onUpdate={() => {
+            if (
+              updateMeasurementMutation.isPending ||
+              !firstMeasurement ||
+              !workspaceId ||
+              !relationshipId
+            ) {
+              return;
+            }
+            updateMeasurementMutation.mutate({
+              body: {
+                expectedVersion: firstMeasurement.version,
+                value: Number(measurementValue),
+              },
+              measurement: firstMeasurement,
+            });
+          }}
           pendingCreate={createMeasurementMutation.isPending}
           pendingUpdate={updateMeasurementMutation.isPending}
           readDecision={read.measurements}
@@ -1479,9 +1612,18 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           localDate={localDate}
           pendingConfig={putConfigMutation.isPending}
           pendingDaily={putDailyMutation.isPending}
-          onConfigSave={(enabledMetrics) =>
-            putConfigMutation.mutate(enabledMetrics)
-          }
+          onConfigSave={(enabledMetrics) => {
+            if (putConfigMutation.isPending) return;
+            putConfigMutation.mutate({
+              body: {
+                enabledMetrics,
+                ...(adherenceConfigQuery.data
+                  ? { expectedVersion: adherenceConfigQuery.data.version }
+                  : {}),
+              },
+              enabledMetrics,
+            });
+          }}
           onDailyNutritionChange={setDailyNutrition}
           onDailyReasonChange={setDailyReason}
           onDailySave={() => {
@@ -1497,7 +1639,31 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
               setStatusMessage(labels.status.historical);
               return;
             }
-            putDailyMutation.mutate({ today: submissionToday });
+            if (putDailyMutation.isPending) return;
+            putDailyMutation.mutate({
+              body: {
+                ...(dailyTrackingQuery.data
+                  ? { expectedVersion: dailyTrackingQuery.data.version }
+                  : {}),
+                ...(isHistoricalDate(localDate, submissionToday)
+                  ? { reason: dailyReason }
+                  : {}),
+                values: {
+                  ...(dailyNutrition
+                    ? {
+                        NUTRITION: {
+                          adherencePercent: Number(dailyNutrition),
+                        },
+                      }
+                    : {}),
+                  ...(dailySteps
+                    ? { STEPS: { count: Number(dailySteps) } }
+                    : {}),
+                  ...(dailyWater ? { WATER: { ml: Number(dailyWater) } } : {}),
+                },
+              },
+              localDate,
+            });
           }}
           onDailyStepsChange={setDailySteps}
           onDailyWaterChange={setDailyWater}
@@ -1543,17 +1709,40 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           labels={labels}
           notes={notes}
           onArchive={(note) => {
+            if (archiveNoteMutation.isPending) return;
             if (confirm(labels.confirm.archiveNote))
-              archiveNoteMutation.mutate(note);
+              archiveNoteMutation.mutate({
+                body: { expectedVersion: note.version },
+                note,
+              });
           }}
           onCategoryChange={setNoteCategory}
           onContentChange={setNoteContent}
-          onCreate={() => createNoteMutation.mutate()}
-          onUpdate={(note) => updateNoteMutation.mutate(note)}
+          onCreate={() => {
+            if (createNoteMutation.isPending) return;
+            createNoteMutation.mutate({
+              body: {
+                category: noteCategory,
+                content: noteContent,
+                sensitive: noteVisibility === "PRIVATE",
+                visibility: noteVisibility,
+              },
+            });
+          }}
+          onUpdate={(note) => {
+            if (updateNoteMutation.isPending) return;
+            updateNoteMutation.mutate({
+              body: {
+                content: noteContent || note.content,
+                expectedVersion: note.version,
+              },
+              note,
+            });
+          }}
           onVisibilityChange={setNoteVisibility}
-          pendingArchiveId={archiveNoteMutation.variables?.id ?? null}
+          pendingArchiveId={archiveNoteMutation.variables?.note.id ?? null}
           pendingCreate={createNoteMutation.isPending}
-          pendingUpdateId={updateNoteMutation.variables?.id ?? null}
+          pendingUpdateId={updateNoteMutation.variables?.note.id ?? null}
           readDecision={read.notes}
           visibility={noteVisibility}
         />
@@ -1580,29 +1769,50 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           }
           labels={labels}
           onArchiveTemplate={(template) => {
+            if (archiveTemplateMutation.isPending) return;
             if (confirm(labels.confirm.archiveTemplate)) {
               archiveTemplateMutation.mutate(template);
             }
           }}
-          onCreateAssignment={(templateId) =>
-            createAssignmentMutation.mutate(templateId)
-          }
-          onCreateTemplate={() => createTemplateMutation.mutate()}
+          onCreateAssignment={(templateId) => {
+            if (createAssignmentMutation.isPending) return;
+            createAssignmentMutation.mutate(templateId);
+          }}
+          onCreateTemplate={() => {
+            if (createTemplateMutation.isPending) return;
+            createTemplateMutation.mutate();
+          }}
           onEndAssignment={(assignment) => {
+            if (endAssignmentMutation.isPending) return;
             if (confirm(labels.confirm.endAssignment)) {
               endAssignmentMutation.mutate(assignment);
             }
           }}
-          onReview={(checkin) => reviewCheckInMutation.mutate(checkin)}
+          onReview={(checkin) => {
+            if (reviewCheckInMutation.isPending) return;
+            reviewCheckInMutation.mutate(checkin);
+          }}
           onSelectCheckIn={setSelectedCheckInId}
           onSelectTemplate={setSelectedTemplateId}
-          onReviseTemplate={(template) =>
-            reviseTemplateMutation.mutate(template)
-          }
+          onReviseTemplate={(template) => {
+            if (reviseTemplateMutation.isPending) return;
+            reviseTemplateMutation.mutate(template);
+          }}
           onTemplateNameChange={setTemplateName}
-          onUpdateAssignment={(assignment) =>
-            updateAssignmentMutation.mutate(assignment)
-          }
+          onUpdateAssignment={(assignment) => {
+            if (updateAssignmentMutation.isPending) return;
+            updateAssignmentMutation.mutate({
+              assignment,
+              body: {
+                expectedVersion: assignment.version,
+                recurrence: {
+                  dayOfWeek: assignment.recurrence.dayOfWeek,
+                  frequency: "WEEKLY",
+                  timezone: workspace.workspaceTimezone,
+                },
+              },
+            });
+          }}
           readAssignmentsDecision={read.checkinAssignments}
           readCheckInsDecision={read.checkins}
           readTemplatesDecision={read.templates}
@@ -1615,7 +1825,7 @@ function ProgressContent({ labels }: { labels: ProgressLabels }) {
           pendingAssignmentCreate={createAssignmentMutation.isPending}
           pendingAssignmentEndId={endAssignmentMutation.variables?.id ?? null}
           pendingAssignmentUpdateId={
-            updateAssignmentMutation.variables?.id ?? null
+            updateAssignmentMutation.variables?.assignment.id ?? null
           }
           pendingReviewId={reviewCheckInMutation.variables?.id ?? null}
           pendingTemplateArchiveId={
@@ -1770,16 +1980,30 @@ function isHistoricalDate(localDate: string, today: string): boolean {
   return localDate < previousLocalDate(today);
 }
 
+function isHistoricalAtSubmission(
+  localDate: string,
+  instant: Date,
+  timeZone: string,
+): boolean {
+  return isHistoricalDate(
+    localDate,
+    localDateInWorkspaceTimeZone(instant, timeZone),
+  );
+}
+
 export function prepareMeasurementCreateCommand(input: {
   accessContext: AuthorizationCacheContext;
+  membershipId: MembershipId;
   metricDefinitionId: MetricDefinitionId;
   notes: string;
+  principalId: UserId;
   relationshipId: RelationshipId;
   value: number;
   workspaceId: WorkspaceId;
 }): MeasurementCreateCommand {
+  const boundary = stableCommandBoundary(input);
   const draft = {
-    accessContext: input.accessContext,
+    boundary,
     metricDefinitionId: input.metricDefinitionId,
     notes: input.notes || undefined,
     params: {
@@ -1803,8 +2027,8 @@ export function prepareMeasurementCreateCommand(input: {
     body,
     draftId,
     logicalId: commandLogicalId({
-      accessContext: input.accessContext,
       body,
+      boundary,
       params: {
         relationshipId: input.relationshipId,
         workspaceId: input.workspaceId,
@@ -1826,13 +2050,84 @@ function retireMeasurementCreateCommand(command: MeasurementCreateCommand) {
 }
 
 function commandLogicalId(input: {
-  accessContext: AuthorizationCacheContext;
   body: unknown;
-  generation?: number;
+  boundary: StableCommandBoundary;
   params: unknown;
   route: string;
 }): string {
   return stableStringify(input);
+}
+
+function stableCommandBoundary(input: {
+  accessContext: AuthorizationCacheContext;
+  membershipId: MembershipId;
+  principalId: UserId;
+  workspaceId: WorkspaceId;
+}): StableCommandBoundary {
+  return {
+    accessContext: input.accessContext,
+    membershipId: input.membershipId,
+    principalId: input.principalId,
+    workspaceId: input.workspaceId,
+  };
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length && left.every((item) => right.includes(item))
+  );
+}
+
+function measurementUpdateApplied(
+  command: MeasurementUpdateCommand,
+  latest: MeasurementDto,
+) {
+  return (
+    latest.version > command.body.expectedVersion &&
+    latest.value === command.body.value
+  );
+}
+
+function dailyTrackingApplied(
+  body: ProgressDailyTrackingBodyDto,
+  latest: { values: ProgressDailyTrackingBodyDto["values"]; version: number },
+) {
+  return Object.entries(body.values).every(([metric, value]) => {
+    const latestValue = latest.values[metric as keyof typeof latest.values];
+    return stableStringify(latestValue) === stableStringify(value);
+  });
+}
+
+function noteUpdateApplied(
+  command: NoteUpdateCommand,
+  latest: CoachingNoteDto,
+) {
+  return (
+    latest.version > command.body.expectedVersion &&
+    latest.content === command.body.content
+  );
+}
+
+function noteArchiveApplied(
+  command: NoteArchiveCommand,
+  latest: CoachingNoteDto,
+) {
+  return (
+    latest.version > command.body.expectedVersion &&
+    latest.status === "ARCHIVED"
+  );
+}
+
+function assignmentUpdateApplied(
+  command: AssignmentUpdateCommand,
+  latest: CheckInAssignmentDto,
+) {
+  return (
+    latest.version > command.body.expectedVersion &&
+    latest.recurrence.dayOfWeek === command.body.recurrence.dayOfWeek &&
+    latest.recurrence.frequency === command.body.recurrence.frequency &&
+    latest.recurrence.timezone === command.body.recurrence.timezone
+  );
 }
 
 async function withIdempotentCommand<T>(
@@ -1880,12 +2175,24 @@ function retireCommandKey(logicalId: string) {
 
 export const progressCommandRegistryForTests = {
   commandKey,
+  logicalId: commandLogicalId,
   markCommandAmbiguous,
+  maxCommandRecords,
   reset: () => {
     commandRecords.clear();
     measurementCreateCommands.clear();
   },
   retireCommandKey,
+  stableBoundary: stableCommandBoundary,
+  comparisons: {
+    adherenceConfigApplied: sameStringSet,
+    assignmentUpdateApplied,
+    dailyTrackingApplied,
+    measurementUpdateApplied,
+    noteArchiveApplied,
+    noteUpdateApplied,
+  },
+  isHistoricalAtSubmission,
 };
 
 async function ambiguousMutationSideEffects(

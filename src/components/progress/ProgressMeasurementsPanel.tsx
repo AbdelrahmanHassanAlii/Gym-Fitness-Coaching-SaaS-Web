@@ -61,6 +61,9 @@ export function ProgressMeasurementsPanel({
         className={styles.formGrid}
         onSubmit={(event) => {
           event.preventDefault();
+          if (!canCreate.allowed || metrics.length === 0 || pendingCreate) {
+            return;
+          }
           onCreate();
         }}
       >
@@ -104,7 +107,16 @@ export function ProgressMeasurementsPanel({
           disabled={
             !canUpdate.allowed || measurements.length === 0 || pendingUpdate
           }
-          onClick={onUpdate}
+          onClick={() => {
+            if (
+              !canUpdate.allowed ||
+              measurements.length === 0 ||
+              pendingUpdate
+            ) {
+              return;
+            }
+            onUpdate();
+          }}
           type="button"
         >
           {labels.actions.update}

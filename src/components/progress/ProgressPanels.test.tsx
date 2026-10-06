@@ -134,9 +134,9 @@ describe("progress corrective panel guards", () => {
     ).toBeGreaterThan(0);
   });
 
-  test("pending guards disable representative duplicate submits", () => {
+  test("measurement create handler rejects submit events while pending", () => {
     const onCreateMeasurement = vi.fn();
-    render(
+    const { container } = render(
       <ProgressMeasurementsPanel
         canCreate={allowed}
         canUpdate={allowed}
@@ -168,12 +168,13 @@ describe("progress corrective panel guards", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Create"));
+    fireEvent.submit(container.querySelector("form")!);
     expect(onCreateMeasurement).not.toHaveBeenCalled();
   });
 
-  test("non-idempotent pending controls are disabled", () => {
-    render(
+  test("note create handler rejects submit events while pending", () => {
+    const onCreate = vi.fn();
+    const { container } = render(
       <CoachingNotesPanel
         canArchive={allowed}
         canCreate={allowed}
@@ -186,7 +187,7 @@ describe("progress corrective panel guards", () => {
         onArchive={vi.fn()}
         onCategoryChange={vi.fn()}
         onContentChange={vi.fn()}
-        onCreate={vi.fn()}
+        onCreate={onCreate}
         onUpdate={vi.fn()}
         onVisibilityChange={vi.fn()}
         pendingArchiveId={null}
@@ -196,11 +197,15 @@ describe("progress corrective panel guards", () => {
         visibility="PRIVATE"
       />,
     );
+    fireEvent.submit(container.querySelector("form")!);
     expect(screen.getByText("Create")).toBeDisabled();
+    expect(onCreate).not.toHaveBeenCalled();
   });
 
-  test("daily pending controls are disabled independently", () => {
-    render(
+  test("daily handlers reject submit events while pending", () => {
+    const onConfigSave = vi.fn();
+    const onDailySave = vi.fn();
+    const { container } = render(
       <DailyAdherencePanel
         config={null}
         daily={null}
@@ -212,10 +217,10 @@ describe("progress corrective panel guards", () => {
         isLoading={false}
         labels={labels}
         localDate="2026-05-01"
-        onConfigSave={vi.fn()}
+        onConfigSave={onConfigSave}
         onDailyNutritionChange={vi.fn()}
         onDailyReasonChange={vi.fn()}
-        onDailySave={vi.fn()}
+        onDailySave={onDailySave}
         onDailyStepsChange={vi.fn()}
         onDailyWaterChange={vi.fn()}
         pendingConfig={true}
@@ -225,7 +230,101 @@ describe("progress corrective panel guards", () => {
         saveDailyDecision={allowed}
       />,
     );
+    const forms = container.querySelectorAll("form");
+    fireEvent.submit(forms[0]!);
+    fireEvent.submit(forms[1]!);
     expect(screen.getAllByText("Save")[0]).toBeDisabled();
     expect(screen.getAllByText("Save")[1]).toBeDisabled();
+    expect(onConfigSave).not.toHaveBeenCalled();
+    expect(onDailySave).not.toHaveBeenCalled();
+  });
+
+  test("check-in assignment update and review handlers reject pending duplicates", () => {
+    const onUpdateAssignment = vi.fn();
+    const onReview = vi.fn();
+    render(
+      <CheckInsPanel
+        assignments={[
+          {
+            active: true,
+            id: "assignment_a" as never,
+            recurrence: {
+              dayOfWeek: 1,
+              frequency: "WEEKLY",
+              timezone: "Africa/Cairo",
+            },
+            relationshipId: "relationship_a" as never,
+            startedAt: "2026-05-01T00:00:00.000Z",
+            templateId: "template_a" as never,
+            version: 1,
+            workspaceId: "workspace_a" as never,
+          },
+        ]}
+        canArchiveTemplate={allowed}
+        canAssign={allowed}
+        canCreateTemplate={allowed}
+        canEndAssignment={allowed}
+        canReview={allowed}
+        canUpdateAssignment={allowed}
+        canUpdateTemplate={allowed}
+        checkInDetail={null}
+        checkins={[]}
+        firstAssignment={null}
+        firstTemplate={null}
+        isLoading={false}
+        labels={labels}
+        onArchiveTemplate={vi.fn()}
+        onCreateAssignment={vi.fn()}
+        onCreateTemplate={vi.fn()}
+        onEndAssignment={vi.fn()}
+        onReview={onReview}
+        onReviewCommentChange={vi.fn()}
+        onReviseTemplate={vi.fn()}
+        onSelectCheckIn={vi.fn()}
+        onSelectTemplate={vi.fn()}
+        onTemplateNameChange={vi.fn()}
+        onUpdateAssignment={onUpdateAssignment}
+        pendingAssignmentCreate={false}
+        pendingAssignmentEndId={null}
+        pendingAssignmentUpdateId={"assignment_a"}
+        pendingReviewId={"checkin_a" as never}
+        pendingTemplateArchiveId={null}
+        pendingTemplateCreate={false}
+        pendingTemplateRevisionId={null}
+        readAssignmentsDecision={allowed}
+        readCheckInsDecision={allowed}
+        readTemplatesDecision={allowed}
+        reviewComment="looks good"
+        reviewableCheckIn={{
+          assignmentId: "assignment_a" as never,
+          dayOfWeek: 1,
+          dueAt: "2026-05-08T00:00:00.000Z",
+          id: "checkin_a" as never,
+          opensAt: "2026-05-01T00:00:00.000Z",
+          periodEndAt: "2026-05-08T00:00:00.000Z",
+          periodKey: "2026-W18",
+          periodStartAt: "2026-05-01T00:00:00.000Z",
+          relationshipId: "relationship_a" as never,
+          responses: [],
+          status: "SUBMITTED",
+          templateId: "template_a" as never,
+          templateRevisionId: "revision_a" as never,
+          timezone: "Africa/Cairo",
+          version: 2,
+          workspaceId: "workspace_a" as never,
+        }}
+        selectedCheckInId={"checkin_a" as never}
+        selectedTemplateId={null}
+        templateDetail={null}
+        templateName=""
+        templates={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Update"));
+    fireEvent.submit(screen.getByText("Review").closest("form")!);
+
+    expect(onUpdateAssignment).not.toHaveBeenCalled();
+    expect(onReview).not.toHaveBeenCalled();
   });
 });

@@ -60,6 +60,7 @@ export function CoachingNotesPanel({
         className={styles.formGrid}
         onSubmit={(event) => {
           event.preventDefault();
+          if (!canCreate.allowed || pendingCreate) return;
           onCreate();
         }}
       >
@@ -116,7 +117,16 @@ export function CoachingNotesPanel({
                   note.status !== "ACTIVE" ||
                   pendingUpdateId === note.id
                 }
-                onClick={() => onUpdate(note)}
+                onClick={() => {
+                  if (
+                    !canUpdate.allowed ||
+                    note.status !== "ACTIVE" ||
+                    pendingUpdateId === note.id
+                  ) {
+                    return;
+                  }
+                  onUpdate(note);
+                }}
                 type="button"
               >
                 {labels.actions.update}
@@ -127,7 +137,16 @@ export function CoachingNotesPanel({
                   note.status !== "ACTIVE" ||
                   pendingArchiveId === note.id
                 }
-                onClick={() => onArchive(note)}
+                onClick={() => {
+                  if (
+                    !canArchive.allowed ||
+                    note.status !== "ACTIVE" ||
+                    pendingArchiveId === note.id
+                  ) {
+                    return;
+                  }
+                  onArchive(note);
+                }}
                 type="button"
               >
                 {labels.actions.archive}

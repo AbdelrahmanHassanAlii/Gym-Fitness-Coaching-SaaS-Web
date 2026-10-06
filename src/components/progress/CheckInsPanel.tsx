@@ -108,6 +108,9 @@ export function CheckInsPanel({
                 className={styles.formGrid}
                 onSubmit={(event) => {
                   event.preventDefault();
+                  if (!canCreateTemplate.allowed || pendingTemplateCreate) {
+                    return;
+                  }
                   onCreateTemplate();
                 }}
               >
@@ -150,7 +153,16 @@ export function CheckInsPanel({
                           template.status !== "ACTIVE" ||
                           pendingTemplateRevisionId === template.id
                         }
-                        onClick={() => onReviseTemplate(template)}
+                        onClick={() => {
+                          if (
+                            !canUpdateTemplate.allowed ||
+                            template.status !== "ACTIVE" ||
+                            pendingTemplateRevisionId === template.id
+                          ) {
+                            return;
+                          }
+                          onReviseTemplate(template);
+                        }}
                         type="button"
                       >
                         {labels.actions.submitRevision}
@@ -161,7 +173,16 @@ export function CheckInsPanel({
                           template.status !== "ACTIVE" ||
                           pendingTemplateArchiveId === template.id
                         }
-                        onClick={() => onArchiveTemplate(template)}
+                        onClick={() => {
+                          if (
+                            !canArchiveTemplate.allowed ||
+                            template.status !== "ACTIVE" ||
+                            pendingTemplateArchiveId === template.id
+                          ) {
+                            return;
+                          }
+                          onArchiveTemplate(template);
+                        }}
                         type="button"
                       >
                         {labels.actions.archive}
@@ -211,7 +232,10 @@ export function CheckInsPanel({
                   pendingAssignmentCreate
                 }
                 onClick={() =>
-                  firstTemplate && onCreateAssignment(firstTemplate.id)
+                  firstTemplate &&
+                  canAssign.allowed &&
+                  !pendingAssignmentCreate &&
+                  onCreateAssignment(firstTemplate.id)
                 }
                 type="button"
               >
@@ -234,7 +258,16 @@ export function CheckInsPanel({
                           !assignment.active ||
                           pendingAssignmentUpdateId === assignment.id
                         }
-                        onClick={() => onUpdateAssignment(assignment)}
+                        onClick={() => {
+                          if (
+                            !canUpdateAssignment.allowed ||
+                            !assignment.active ||
+                            pendingAssignmentUpdateId === assignment.id
+                          ) {
+                            return;
+                          }
+                          onUpdateAssignment(assignment);
+                        }}
                         type="button"
                       >
                         {labels.actions.update}
@@ -245,7 +278,16 @@ export function CheckInsPanel({
                           !assignment.active ||
                           pendingAssignmentEndId === assignment.id
                         }
-                        onClick={() => onEndAssignment(assignment)}
+                        onClick={() => {
+                          if (
+                            !canEndAssignment.allowed ||
+                            !assignment.active ||
+                            pendingAssignmentEndId === assignment.id
+                          ) {
+                            return;
+                          }
+                          onEndAssignment(assignment);
+                        }}
                         type="button"
                       >
                         {labels.actions.end}
@@ -269,7 +311,15 @@ export function CheckInsPanel({
               className={styles.formGrid}
               onSubmit={(event) => {
                 event.preventDefault();
-                if (reviewableCheckIn) onReview(reviewableCheckIn);
+                if (
+                  !canReview.allowed ||
+                  reviewableCheckIn === null ||
+                  reviewableCheckIn.status !== "SUBMITTED" ||
+                  pendingReviewId === reviewableCheckIn.id
+                ) {
+                  return;
+                }
+                onReview(reviewableCheckIn);
               }}
             >
               <label>
