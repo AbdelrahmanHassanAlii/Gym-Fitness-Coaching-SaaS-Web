@@ -1,5 +1,6 @@
 export * from "./analytics/contracts";
 export * from "./auth/contracts";
+export * from "./checkins/contracts";
 export * from "./commercial/contracts";
 export * from "./common/concurrency";
 export * from "./common/evidence";
@@ -10,6 +11,7 @@ export * from "./files/contracts";
 export * from "./notifications/contracts";
 export * from "./nutrition/contracts";
 export * from "./permissions/contracts";
+export * from "./progress/contracts";
 export * from "./relationships/contracts";
 export * from "./support/contracts";
 export * from "./training/contracts";

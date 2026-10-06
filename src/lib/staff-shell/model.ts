@@ -103,9 +103,22 @@ const nutritionNavPermissions = [
   "analytics.nutrition.read",
 ] as const satisfies readonly PermissionKey[];
 
+const progressNavPermissions = [
+  "measurements.read",
+  "adherence.read",
+  "progress_photos.read",
+  "health.read",
+  "health.food_allergies.read",
+  "notes.read",
+  "checkins.read",
+  "analytics.progress.read",
+  "analytics.adherence.read",
+] as const satisfies readonly PermissionKey[];
+
 const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
   leads: "/app/leads",
   nutrition: "/app/nutrition",
+  progress: "/app/progress",
   relationships: "/app/relationships",
   training: "/app/training",
   workspace: "/app/workspace",
@@ -196,22 +209,38 @@ export function createStaffNavigation({
                 ),
               ),
             )
-          : permission === undefined
-            ? href === undefined
-              ? "disabled"
-              : "allowed"
-            : accessStatus(
-                evaluateAccess(
-                  accessFacts,
-                  accessRequirement(context, permission),
+          : id === "progress"
+            ? aggregateAccessStatus(
+                progressNavPermissions.map((item) =>
+                  accessStatus(
+                    evaluateAccess(
+                      accessFacts,
+                      accessRequirement(context, item),
+                    ),
+                  ),
                 ),
-              );
+              )
+            : permission === undefined
+              ? href === undefined
+                ? "disabled"
+                : "allowed"
+              : accessStatus(
+                  evaluateAccess(
+                    accessFacts,
+                    accessRequirement(context, permission),
+                  ),
+                );
 
       return {
         description: labels[id].description,
         href,
         id,
-        permission: id === "nutrition" ? nutritionNavPermissions : permission,
+        permission:
+          id === "nutrition"
+            ? nutritionNavPermissions
+            : id === "progress"
+              ? progressNavPermissions
+              : permission,
         status,
         title: labels[id].title,
       } satisfies StaffShellNavItem;

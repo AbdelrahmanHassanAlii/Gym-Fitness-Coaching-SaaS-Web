@@ -141,6 +141,53 @@ describe("staff shell model", () => {
     });
   });
 
+  test("progress navigation uses any frozen readable panel permission", () => {
+    const workspace = selectStaffWorkspaces([
+      myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),
+    ])[0];
+    const context = createStaffShellContext({
+      branchLabel: "All branches",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const nav = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [
+          decision("measurements.read", false, "DENY"),
+          decision("adherence.read", false, "DENY"),
+          decision("progress_photos.read", false, "DENY"),
+          decision("health.read", false, "DENY"),
+          decision("health.food_allergies.read", true, "ALLOW"),
+          decision("notes.read", false, "DENY"),
+          decision("checkins.read", false, "DENY"),
+          decision("analytics.progress.read", false, "DENY"),
+          decision("analytics.adherence.read", false, "DENY"),
+        ],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    });
+
+    expect(nav.find((item) => item.id === "progress")).toMatchObject({
+      href: "/app/progress",
+      permission: [
+        "measurements.read",
+        "adherence.read",
+        "progress_photos.read",
+        "health.read",
+        "health.food_allergies.read",
+        "notes.read",
+        "checkins.read",
+        "analytics.progress.read",
+        "analytics.adherence.read",
+      ],
+      status: "allowed",
+    });
+  });
+
   test("commercial route metadata uses billing access, not platform lead access", () => {
     const workspace = selectStaffWorkspaces([
       myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),

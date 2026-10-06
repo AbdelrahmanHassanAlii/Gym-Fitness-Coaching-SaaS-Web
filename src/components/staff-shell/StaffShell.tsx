@@ -391,7 +391,7 @@ function accessFactsForQuery(input: {
   return unresolvedCurrentUserAccessFacts(input.identity);
 }
 
-function currentUserDecisionRequestsForPath(
+export function currentUserDecisionRequestsForPath(
   pathname: string,
 ): CurrentUserDecisionRequest[] {
   const requests = new Map<string, CurrentUserDecisionRequest>();
@@ -479,6 +479,21 @@ function currentUserDecisionRequestsForPath(
       "nutrition.plans.complete",
       "nutrition.plans.create",
       "nutrition.plans.update",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/progress")) {
+    for (const permission of [
+      "measurements.read",
+      "progress_photos.read",
+      "health.read",
+      "health.food_allergies.read",
+      "notes.read",
+      "checkins.read",
+      "analytics.progress.read",
+      "analytics.adherence.read",
     ] satisfies PermissionKey[]) {
       requests.set(permission, workspaceRequest(permission));
     }
