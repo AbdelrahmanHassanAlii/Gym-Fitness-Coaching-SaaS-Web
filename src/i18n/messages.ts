@@ -154,7 +154,7 @@ export const messages = {
         conservativeGym:
           "إجراءات غذاء الجيم مقيدة هنا لأن صلاحية الصف يحددها الخادم.",
         createScopeHelp:
-          "إنشاء الأغذية يحترم قواعد الخادم لنطاق PRIVATE أو GYM؛ لا تنشئ هذه الواجهة أغذية نظام.",
+          "تعرض هذه الواجهة إنشاء الغذاء الخاص فقط لأن صلاحية إنشاء غذاء الجيم يحددها الخادم من مصدر صلاحية لا تعرضه معلومات العرض.",
       },
       plans: {
         title: "خطط التغذية",
@@ -243,6 +243,7 @@ export const messages = {
         ARCHIVED: "مؤرشفة",
         COMPLETED: "مكتملة",
         DRAFT: "مسودة",
+        REPLACED: "مستبدلة",
         GRAM: "جرام",
         GYM: "الجيم",
         MILLILITER: "ملليلتر",
@@ -729,7 +730,7 @@ export const messages = {
         conservativeGym:
           "Gym food actions are conservative because row authority is decided by the Backend.",
         createScopeHelp:
-          "Food creation follows the Backend rules for PRIVATE or GYM scope; this UI does not create system foods.",
+          "This UI only presents private food creation because gym food authority depends on Backend decision-source details that presentation facts do not expose.",
       },
       plans: {
         title: "Nutrition plans",
@@ -822,6 +823,7 @@ export const messages = {
         ARCHIVED: "Archived",
         COMPLETED: "Completed",
         DRAFT: "Draft",
+        REPLACED: "Replaced",
         GRAM: "Gram",
         GYM: "Gym",
         MILLILITER: "Milliliter",

@@ -14,6 +14,7 @@ export const foodStatuses = ["ACTIVE", "ARCHIVED"] as const;
 export const nutritionPlanStatuses = [
   "DRAFT",
   "ACTIVE",
+  "REPLACED",
   "COMPLETED",
   "ARCHIVED",
 ] as const;

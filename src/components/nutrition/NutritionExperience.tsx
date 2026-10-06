@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreateNutritionPlanDto,
@@ -153,11 +153,13 @@ export type NutritionLabels = {
 type NutritionTab = "analytics" | "foods" | "plans" | "tracking";
 
 type ActivationCommand = {
+  ambiguous: boolean;
   key: string;
   logicalId: string;
 };
 
-const activationKeysByOwner = new Map<string, Map<string, ActivationCommand>>();
+const activationCommands = new Map<string, ActivationCommand>();
+const maxActivationCommands = 64;
 
 export function NutritionExperience({ labels }: { labels: NutritionLabels }) {
   const { generation } = useAuthSession();
@@ -179,7 +181,6 @@ function NutritionContent({ labels }: { labels: NutritionLabels }) {
   const queryClient = useQueryClient();
   const { apiClient, generation, state } = useAuthSession();
   const { accessFacts, shellContext, workspace } = useStaffWorkspaceContext();
-  const commandOwner = useId();
   const [selectedTab, setSelectedTab] = useState<NutritionTab>("foods");
   const [selectedRelationshipId, setSelectedRelationshipId] =
     useState<RelationshipId | null>(null);
@@ -251,12 +252,6 @@ function NutritionContent({ labels }: { labels: NutritionLabels }) {
       permission: "nutrition.plans.update",
     }),
   };
-
-  useEffect(() => {
-    return () => {
-      activationKeysByOwner.delete(commandOwner);
-    };
-  }, [commandOwner]);
 
   const relationshipsQuery = useQuery({
     enabled: canQuery && readDecisions.relationships.allowed,
@@ -548,30 +543,43 @@ function NutritionContent({ labels }: { labels: NutritionLabels }) {
 
   const activateMutation = useMutation({
     mutationFn: (plan: NutritionPlanDto) => {
-      const logicalId = [
+      const body = { expectedVersion: plan.version };
+      const logicalId = nutritionActivationLogicalId({
+        accessContext,
+        generation,
+        plan,
+        relationshipId: activeRelationshipId,
         workspaceId,
-        activeRelationshipId,
-        plan.id,
-        plan.version,
-      ].join("|");
-      const idempotencyKey = activationKey(commandOwner, logicalId);
+      });
+      const idempotencyKey = activationKey(logicalId);
       return activateNutritionPlan(
         apiClient,
         workspaceId!,
         activeRelationshipId!,
         plan.id,
-        { expectedVersion: plan.version },
+        body,
         idempotencyKey,
-      ).then((result) => ({ planId: plan.id, result }));
+      ).then((result) => ({ logicalId, planId: plan.id, result }));
     },
-    onError: async (mutationError) => {
-      if (!isAmbiguous(mutationError)) clearActivationKeys(commandOwner);
+    onError: async (mutationError, plan) => {
+      const logicalId = nutritionActivationLogicalId({
+        accessContext,
+        generation,
+        plan,
+        relationshipId: activeRelationshipId,
+        workspaceId,
+      });
+      if (isAmbiguous(mutationError) || isIdempotencyKeyReused(mutationError)) {
+        markActivationAmbiguous(logicalId);
+      } else {
+        retireActivationKey(logicalId);
+      }
       await invalidate(plansListKey());
       await invalidate(selectedPlanKey());
       setError(errorMessage(mutationError, labels));
     },
-    onSuccess: async ({ planId }) => {
-      clearActivationKeys(commandOwner);
+    onSuccess: async ({ logicalId, planId }) => {
+      retireActivationKey(logicalId);
       await invalidate(plansListKey());
       await invalidate(selectedPlanKey(planId));
       setStatusMessage(labels.status.saved);
@@ -863,19 +871,73 @@ function actionDecision(input: {
   });
 }
 
-function activationKey(owner: string, logicalId: string): string {
-  const commands =
-    activationKeysByOwner.get(owner) ?? new Map<string, ActivationCommand>();
-  activationKeysByOwner.set(owner, commands);
-  const existing = commands.get(logicalId);
+export function nutritionActivationLogicalId({
+  accessContext,
+  generation,
+  plan,
+  relationshipId,
+  workspaceId,
+}: {
+  accessContext: AuthorizationCacheContext;
+  generation: number;
+  plan: NutritionPlanDto;
+  relationshipId: RelationshipId | null;
+  workspaceId: WorkspaceId | null;
+}): string {
+  return [
+    generation,
+    accessContext,
+    workspaceId,
+    relationshipId,
+    plan.id,
+    stableStringify({ expectedVersion: plan.version }),
+  ].join("|");
+}
+
+function activationKey(logicalId: string): string {
+  const existing = activationCommands.get(logicalId);
   if (existing) return existing.key;
-  const created = { key: createIdempotencyKey(), logicalId };
-  commands.set(logicalId, created);
+  if (activationCommands.size >= maxActivationCommands) {
+    const evictable = [...activationCommands.values()].find(
+      (command) => !command.ambiguous,
+    );
+    if (evictable === undefined) {
+      throw new Error("activation command key capacity exhausted");
+    }
+    activationCommands.delete(evictable.logicalId);
+  }
+  const created = { ambiguous: false, key: createIdempotencyKey(), logicalId };
+  activationCommands.set(logicalId, created);
   return created.key;
 }
 
-function clearActivationKeys(owner: string) {
-  activationKeysByOwner.get(owner)?.clear();
+function markActivationAmbiguous(logicalId: string) {
+  const existing = activationCommands.get(logicalId);
+  if (existing) existing.ambiguous = true;
+}
+
+function retireActivationKey(logicalId: string) {
+  activationCommands.delete(logicalId);
+}
+
+export const nutritionActivationCommandRegistryForTests = {
+  activationKey,
+  markActivationAmbiguous,
+  reset: () => activationCommands.clear(),
+  retireActivationKey,
+};
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
 }
 
 function errorMessage(error: unknown, labels: NutritionLabels): string {
@@ -907,6 +969,14 @@ function isAmbiguous(error: unknown): boolean {
     isApiError(error) &&
     (error.kind === "network" ||
       (error.kind === "backend" && (error.status ?? 0) >= 500))
+  );
+}
+
+function isIdempotencyKeyReused(error: unknown): boolean {
+  return (
+    isApiError(error) &&
+    error.kind === "backend" &&
+    error.code === "IDEMPOTENCY_KEY_REUSED"
   );
 }
 

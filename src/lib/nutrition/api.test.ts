@@ -7,6 +7,7 @@ import type {
   RelationshipId,
   WorkspaceId,
 } from "@/contracts";
+import { isNutritionPlanDto } from "@/contracts";
 import type { ApiClient, ApiRequestOptions } from "@/lib/api";
 import {
   activateNutritionPlan,
@@ -33,6 +34,18 @@ const revisionId = "nutrition_revision_a" as NutritionPlanRevisionId;
 const foodId = "food_a" as FoodId;
 
 describe("nutrition API", () => {
+  test("accepts every Backend nutrition plan status including replaced", () => {
+    for (const status of [
+      "DRAFT",
+      "ACTIVE",
+      "REPLACED",
+      "COMPLETED",
+      "ARCHIVED",
+    ]) {
+      expect(isNutritionPlanDto(plan({ status }))).toBe(true);
+    }
+  });
+
   test("uses exact workspace food command contracts without invented idempotency", async () => {
     const api = fakeApiClient([
       { data: [food()] },

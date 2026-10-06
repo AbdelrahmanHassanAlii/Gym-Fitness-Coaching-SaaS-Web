@@ -124,7 +124,7 @@ export function NutritionPlanPanel({
               </AccessControlledButton>
               <AccessControlledButton
                 decision={decisions.archive}
-                disabled={pending || planDetail.plan.status === "ARCHIVED"}
+                disabled={pending || !isArchiveEligible(planDetail.plan.status)}
                 disabledReason={labels.errors.denied}
                 loadingLabel={labels.loading}
                 onClick={() => actions.archive(planDetail.plan)}
@@ -133,15 +133,20 @@ export function NutritionPlanPanel({
                 {labels.actions.archive}
               </AccessControlledButton>
             </div>
-            <NutritionPlanEditor
-              decisions={{ create: decisions.create, update: decisions.update }}
-              foods={foods}
-              labels={labels}
-              onCreate={actions.create}
-              onRevision={(body) => actions.revision(planDetail.plan, body)}
-              pending={pending}
-              planDetail={planDetail}
-            />
+            {isRevisionEligible(planDetail.plan.status) ? (
+              <NutritionPlanEditor
+                decisions={{
+                  create: decisions.create,
+                  update: decisions.update,
+                }}
+                foods={foods}
+                labels={labels}
+                onCreate={actions.create}
+                onRevision={(body) => actions.revision(planDetail.plan, body)}
+                pending={pending}
+                planDetail={planDetail}
+              />
+            ) : null}
           </>
         ) : (
           <NutritionPlanEditor
@@ -215,4 +220,12 @@ function PlanDetail({
 
 function value(input: number | null | undefined): string {
   return input === null || input === undefined ? "—" : String(input);
+}
+
+function isArchiveEligible(status: NutritionPlanDto["status"]): boolean {
+  return status === "DRAFT" || status === "REPLACED" || status === "COMPLETED";
+}
+
+function isRevisionEligible(status: NutritionPlanDto["status"]): boolean {
+  return status === "DRAFT" || status === "ACTIVE";
 }

@@ -9,6 +9,7 @@ import type {
   MembershipId,
   NutritionPlanId,
   NutritionPlanRevisionId,
+  NutritionPlanStatus,
   PermissionDecisionDto,
   RelationshipId,
   SafeAuthUserDto,
@@ -20,7 +21,11 @@ import { ApiError } from "@/lib/api";
 import type { AuthSessionContextValue, AuthState } from "@/lib/auth";
 import type { StaffWorkspaceContextValue } from "@/lib/staff-shell";
 import { messages } from "@/i18n/messages";
-import { NutritionExperience } from "./NutritionExperience";
+import {
+  NutritionExperience,
+  nutritionActivationCommandRegistryForTests,
+  nutritionActivationLogicalId,
+} from "./NutritionExperience";
 
 const workspaceId = "workspace_a" as WorkspaceId;
 const membershipId = "membership_a" as MembershipId;
@@ -28,6 +33,7 @@ const relationshipId = "relationship_a" as RelationshipId;
 const planId = "nutrition_plan_a" as NutritionPlanId;
 const revisionId = "nutrition_revision_a" as NutritionPlanRevisionId;
 const foodId = "food_a" as FoodId;
+let currentPlanInput: Record<string, unknown> = {};
 
 const mocks = vi.hoisted(() => ({
   authSession: {
@@ -94,6 +100,8 @@ describe("nutrition experience", () => {
     } as AuthState;
     mocks.createIdempotencyKey.mockReset();
     mocks.createIdempotencyKey.mockReturnValue("activation-key-1");
+    nutritionActivationCommandRegistryForTests.reset();
+    currentPlanInput = {};
     mocks.staffContext = context([
       "trainees.read",
       "foods.read",
@@ -155,6 +163,60 @@ describe("nutrition experience", () => {
     expect(archiveButtons[1]).toBeDisabled();
   });
 
+  test("does not offer gym or system food create from foods.create alone", async () => {
+    renderNutrition();
+
+    await screen.findByText("Rice");
+    const scope = screen.getByLabelText("Food scope");
+
+    expect(scope).toHaveTextContent("Private");
+    expect(scope).not.toHaveTextContent("Gym");
+    expect(scope).not.toHaveTextContent("System");
+  });
+
+  test.each([
+    ["DRAFT", false, true, true, true],
+    ["ACTIVE", true, false, true, false],
+    ["REPLACED", true, true, false, true],
+    ["COMPLETED", true, true, false, true],
+    ["ARCHIVED", true, true, false, false],
+  ] satisfies Array<[NutritionPlanStatus, boolean, boolean, boolean, boolean]>)(
+    "matches Backend lifecycle controls for %s plans",
+    async (
+      status,
+      activateDisabled,
+      completeDisabled,
+      revisionVisible,
+      archiveEnabled,
+    ) => {
+      currentPlanInput = { status };
+
+      renderNutrition();
+      fireEvent.click(screen.getByRole("tab", { name: "Plans" }));
+
+      expect(await screen.findByText("Cutting plan")).toBeInTheDocument();
+      const activate = await screen.findByRole("button", { name: "Activate" });
+      expect(activate).toHaveProperty("disabled", activateDisabled);
+      expect(screen.getByRole("button", { name: "Complete" })).toHaveProperty(
+        "disabled",
+        completeDisabled,
+      );
+      expect(screen.getByRole("button", { name: "Archive" })).toHaveProperty(
+        "disabled",
+        !archiveEnabled,
+      );
+      if (revisionVisible) {
+        expect(
+          screen.getByRole("button", { name: "Save revision" }),
+        ).toBeInTheDocument();
+      } else {
+        expect(
+          screen.queryByRole("button", { name: "Save revision" }),
+        ).not.toBeInTheDocument();
+      }
+    },
+  );
+
   test("keeps plan activation idempotency key stable across ambiguous retry", async () => {
     let activationCalls = 0;
     mocks.authSession.apiClient.request.mockImplementation(
@@ -193,6 +255,188 @@ describe("nutrition experience", () => {
     expect(activationRequests.map((request) => request.idempotencyKey)).toEqual(
       ["activation-key-1", "activation-key-1"],
     );
+  });
+
+  test("keeps ambiguous activation key across unmount and remount retry", async () => {
+    let activationCalls = 0;
+    mocks.authSession.apiClient.request.mockImplementation(
+      (request: { body?: unknown; idempotencyKey?: string; path: string }) => {
+        if (request.path.endsWith("/activate")) {
+          activationCalls += 1;
+          if (activationCalls === 1) {
+            throw new ApiError({
+              kind: "network",
+              message: "network dropped after submit",
+            });
+          }
+          return Promise.resolve({
+            data: { plan: plan({ status: "ACTIVE", version: 2 }) },
+          });
+        }
+        return nutritionResponse(request.path);
+      },
+    );
+
+    const rendered = renderNutrition();
+    fireEvent.click(screen.getByRole("tab", { name: "Plans" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      messages.en.nutrition.status.unknownOutcome,
+    );
+    rendered.unmount();
+
+    renderNutrition();
+    fireEvent.click(screen.getByRole("tab", { name: "Plans" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
+
+    await waitFor(() => expect(activationCalls).toBe(2));
+    const activationRequests = mocks.authSession.apiClient.request.mock.calls
+      .map((call) => call[0])
+      .filter((request) => String(request.path).endsWith("/activate"));
+    expect(activationRequests.map((request) => request.idempotencyKey)).toEqual(
+      ["activation-key-1", "activation-key-1"],
+    );
+  });
+
+  test("isolates activation keys by command identity and preserves retry-critical capacity", () => {
+    mocks.createIdempotencyKey.mockImplementation(
+      () => `activation-key-${mocks.createIdempotencyKey.mock.calls.length}`,
+    );
+    const base = nutritionActivationLogicalId({
+      accessContext: "user",
+      generation: 1,
+      plan: plan(),
+      relationshipId,
+      workspaceId,
+    });
+    const first =
+      nutritionActivationCommandRegistryForTests.activationKey(base);
+    nutritionActivationCommandRegistryForTests.markActivationAmbiguous(base);
+
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(
+        nutritionActivationLogicalId({
+          accessContext: "user",
+          generation: 1,
+          plan: plan({ version: 2 }),
+          relationshipId,
+          workspaceId,
+        }),
+      ),
+    ).not.toBe(first);
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(
+        nutritionActivationLogicalId({
+          accessContext: "user",
+          generation: 1,
+          plan: plan({ id: "nutrition_plan_b" as NutritionPlanId }),
+          relationshipId,
+          workspaceId,
+        }),
+      ),
+    ).not.toBe(first);
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(
+        nutritionActivationLogicalId({
+          accessContext: "user",
+          generation: 1,
+          plan: plan(),
+          relationshipId: "relationship_b" as RelationshipId,
+          workspaceId,
+        }),
+      ),
+    ).not.toBe(first);
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(
+        nutritionActivationLogicalId({
+          accessContext: "user",
+          generation: 1,
+          plan: plan(),
+          relationshipId,
+          workspaceId: "workspace_b" as WorkspaceId,
+        }),
+      ),
+    ).not.toBe(first);
+
+    for (let index = 0; index < 80; index += 1) {
+      nutritionActivationCommandRegistryForTests.activationKey(
+        `other-${index}`,
+      );
+    }
+
+    expect(nutritionActivationCommandRegistryForTests.activationKey(base)).toBe(
+      first,
+    );
+  });
+
+  test("fails closed instead of evicting retry-critical activation keys when capacity is exhausted", () => {
+    for (let index = 0; index < 64; index += 1) {
+      const logicalId = `critical-${index}`;
+      nutritionActivationCommandRegistryForTests.activationKey(logicalId);
+      nutritionActivationCommandRegistryForTests.markActivationAmbiguous(
+        logicalId,
+      );
+    }
+
+    expect(() =>
+      nutritionActivationCommandRegistryForTests.activationKey("new-command"),
+    ).toThrow(/capacity exhausted/);
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey("critical-0"),
+    ).toBe("activation-key-1");
+  });
+
+  test("retires activation key after definitive completion", () => {
+    mocks.createIdempotencyKey
+      .mockReturnValueOnce("activation-key-1")
+      .mockReturnValueOnce("activation-key-2");
+    const logicalId = nutritionActivationLogicalId({
+      accessContext: "user",
+      generation: 1,
+      plan: plan(),
+      relationshipId,
+      workspaceId,
+    });
+
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(logicalId),
+    ).toBe("activation-key-1");
+    nutritionActivationCommandRegistryForTests.retireActivationKey(logicalId);
+    expect(
+      nutritionActivationCommandRegistryForTests.activationKey(logicalId),
+    ).toBe("activation-key-2");
+  });
+
+  test("does not create a new activation key after idempotency reuse error", async () => {
+    mocks.authSession.apiClient.request.mockImplementation(
+      (request: { body?: unknown; idempotencyKey?: string; path: string }) => {
+        if (request.path.endsWith("/activate")) {
+          throw new ApiError({
+            code: "IDEMPOTENCY_KEY_REUSED",
+            kind: "backend",
+            message: "key reused",
+            status: 409,
+          });
+        }
+        return nutritionResponse(request.path);
+      },
+    );
+
+    renderNutrition();
+    fireEvent.click(screen.getByRole("tab", { name: "Plans" }));
+    const activate = await screen.findByRole("button", { name: "Activate" });
+    fireEvent.click(activate);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    fireEvent.click(activate);
+
+    await waitFor(() =>
+      expect(
+        mocks.authSession.apiClient.request.mock.calls.filter((call) =>
+          String(call[0].path).endsWith("/activate"),
+        ),
+      ).toHaveLength(2),
+    );
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(1);
   });
 
   test("tracking panel is read only and analytics use server fields", async () => {
@@ -295,10 +539,12 @@ function nutritionResponse(path: string) {
     });
   }
   if (path.includes("/nutrition-plans?")) {
-    return Promise.resolve({ data: [plan()] });
+    return Promise.resolve({ data: [plan(currentPlanInput)] });
   }
   if (path.endsWith(`/nutrition-plans/${planId}`)) {
-    return Promise.resolve({ data: { plan: plan(), revision: revision() } });
+    return Promise.resolve({
+      data: { plan: plan(currentPlanInput), revision: revision() },
+    });
   }
   if (path.includes("/daily-tracking/")) {
     return Promise.resolve({

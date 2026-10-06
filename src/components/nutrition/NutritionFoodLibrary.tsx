@@ -21,7 +21,7 @@ type FoodFormValues = {
   nameAr: string;
   nameEn: string;
   proteinG: string;
-  scope: "GYM" | "PRIVATE";
+  scope: "PRIVATE";
 };
 
 const foodUnits: readonly FoodUnit[] = [
@@ -114,8 +114,7 @@ export function NutritionFoodLibrary({
         <label>
           <span>{labels.fields.foodScope}</span>
           <select {...form.register("scope")}>
-            <option value="PRIVATE">PRIVATE</option>
-            <option value="GYM">GYM</option>
+            <option value="PRIVATE">{labels.values.PRIVATE}</option>
           </select>
         </label>
         <label>
@@ -185,7 +184,9 @@ export function NutritionFoodLibrary({
                   {food.calories} {labels.values.kcal}
                 </span>
                 <span>
-                  P {food.proteinG} / C {food.carbsG} / F {food.fatG}
+                  {labels.fields.protein} {food.proteinG} /{" "}
+                  {labels.fields.carbs} {food.carbsG} / {labels.fields.fat}{" "}
+                  {food.fatG}
                 </span>
               </div>
               {system ? (
@@ -280,7 +281,7 @@ function formValuesFromFood(food: NutritionFoodDto): FoodFormValues {
     nameAr: food.names.ar ?? "",
     nameEn: food.names.en ?? "",
     proteinG: String(food.proteinG),
-    scope: food.scope === "GYM" ? "GYM" : "PRIVATE",
+    scope: "PRIVATE",
   };
 }
 
