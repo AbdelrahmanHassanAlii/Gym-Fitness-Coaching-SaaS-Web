@@ -1,12 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  NotificationCategory,
-  NotificationDto,
-  NotificationPageDto,
-} from "@/contracts";
+import type { NotificationCategory, NotificationDto } from "@/contracts";
 import { isCurrentAccessIdentity } from "@/lib/access";
 import { isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
@@ -72,6 +68,12 @@ export interface NotificationsLabels {
 }
 
 type Filter = "all" | "unread";
+interface LoadedNotificationChain {
+  items: NotificationDto[];
+  nextCursor: string | null;
+  pagesLoaded: number;
+}
+
 const pollIntervalMs = 60_000;
 const navLabels = Object.fromEntries(
   [
@@ -125,7 +127,11 @@ function NotificationsContent({
   const { apiClient, generation, state } = useAuthSession();
   const { accessFacts, shellContext, workspace } = useStaffWorkspaceContext();
   const [filter, setFilter] = useState<Filter>("all");
-  const [olderPages, setOlderPages] = useState<NotificationPageDto[]>([]);
+  const [loadedChain, setLoadedChain] = useState<LoadedNotificationChain>({
+    items: [],
+    nextCursor: null,
+    pagesLoaded: 0,
+  });
   const [loadingMore, setLoadingMore] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [markAllPending, setMarkAllPending] = useState(false);
@@ -134,6 +140,7 @@ function NotificationsContent({
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const paginationGenerationRef = useRef(0);
+  const reconciliationGenerationRef = useRef(0);
   const lastFirstPageAtRef = useRef(0);
 
   useEffect(
@@ -189,13 +196,14 @@ function NotificationsContent({
   const firstPage = useQuery({
     enabled: currentIdentity,
     queryFn: async ({ signal }) => {
+      const reconciliationGeneration = reconciliationGenerationRef.current;
       const page = await listNotifications(
         apiClient,
         { limit: notificationsPageLimit, ...(unread ? { unread: true } : {}) },
         signal,
       );
       lastFirstPageAtRef.current = Date.now();
-      return page;
+      return { page, reconciliationGeneration };
     },
     queryKey: queryIdentity
       ? notificationKeys.list(queryIdentity)
@@ -206,7 +214,8 @@ function NotificationsContent({
   const resetFilter = (next: Filter) => {
     if (next === filter) return;
     paginationGenerationRef.current += 1;
-    setOlderPages([]);
+    reconciliationGenerationRef.current += 1;
+    setLoadedChain({ items: [], nextCursor: null, pagesLoaded: 0 });
     setError(null);
     setMessage(null);
     setFilter(next);
@@ -239,12 +248,25 @@ function NotificationsContent({
     };
   }, [currentIdentity, refetchFirstPage]);
 
-  const pages = useMemo(
-    () => (firstPage.data ? [firstPage.data, ...olderPages] : olderPages),
-    [firstPage.data, olderPages],
-  );
-  const notifications = useMemo(() => mergePages(pages), [pages]);
-  const nextCursor = pages.at(-1)?.page.nextCursor ?? null;
+  useEffect(() => {
+    const result = firstPage.data;
+    if (
+      !result ||
+      result.reconciliationGeneration !== reconciliationGenerationRef.current
+    )
+      return;
+    setLoadedChain((current) => ({
+      items: reconcileAuthoritativeItems(current.items, result.page.data),
+      nextCursor:
+        current.pagesLoaded > 1
+          ? current.nextCursor
+          : result.page.page.nextCursor,
+      pagesLoaded: Math.max(1, current.pagesLoaded),
+    }));
+  }, [firstPage.data]);
+
+  const notifications = loadedChain.items;
+  const nextCursor = loadedChain.nextCursor;
   const loadedUnread = notifications.filter(
     (item) => item.readAt === null,
   ).length;
@@ -267,13 +289,18 @@ function NotificationsContent({
         paginationGenerationRef.current !== capturedPagination
       )
         return;
-      setOlderPages((current) => [...current, page]);
+      setLoadedChain((current) => ({
+        items: appendOlderItems(current.items, page.data),
+        nextCursor: page.page.nextCursor,
+        pagesLoaded: current.pagesLoaded + 1,
+      }));
     } catch (loadError) {
       if (!mountedRef.current || identityRef.current !== capturedIdentity)
         return;
       if (isCursorError(loadError)) {
         paginationGenerationRef.current += 1;
-        setOlderPages([]);
+        reconciliationGenerationRef.current += 1;
+        setLoadedChain({ items: [], nextCursor: null, pagesLoaded: 0 });
         setError(labels.errors.cursor);
         await refetchFirstPage();
       } else setError(errorMessage(loadError, labels));
@@ -340,9 +367,20 @@ function NotificationsContent({
     setPendingIds((current) => new Set(current).add(notification.id));
     setError(null);
     try {
-      await markNotificationRead(apiClient, notification.id);
+      const authoritative = await markNotificationRead(
+        apiClient,
+        notification.id,
+      );
       notificationCommandRegistry.retire(logicalId);
       if (!mountedRef.current || identityRef.current !== captured) return;
+      reconciliationGenerationRef.current += 1;
+      setLoadedChain((current) => ({
+        ...current,
+        items:
+          unread && authoritative.readAt !== null
+            ? current.items.filter((item) => item.id !== authoritative.id)
+            : replaceLoadedItem(current.items, authoritative),
+      }));
       setMessage(labels.success.markedOne);
       await refetchFirstPage();
     } catch (mutationError) {
@@ -355,7 +393,14 @@ function NotificationsContent({
         await refetchFirstPage();
       } else {
         setError(errorMessage(mutationError, labels));
-        if (isNotificationNotFound(mutationError)) await refetchFirstPage();
+        if (isNotificationNotFound(mutationError)) {
+          reconciliationGenerationRef.current += 1;
+          setLoadedChain((current) => ({
+            ...current,
+            items: current.items.filter((item) => item.id !== notification.id),
+          }));
+          await refetchFirstPage();
+        }
       }
     } finally {
       if (mountedRef.current && identityRef.current === captured)
@@ -386,6 +431,11 @@ function NotificationsContent({
       const result = await markAllNotificationsRead(apiClient);
       notificationCommandRegistry.retire(logicalId);
       if (!mountedRef.current || identityRef.current !== captured) return;
+      reconciliationGenerationRef.current += 1;
+      setLoadedChain((current) => ({
+        ...current,
+        items: reconcileMarkAll(current.items, result.cutoffAt, unread),
+      }));
       setConfirming(false);
       setMessage(`${labels.success.markedAll} ${result.affectedCount}`);
       await refetchFirstPage();
@@ -560,15 +610,60 @@ function StatePanel({ message }: { message: string }) {
   );
 }
 
-function mergePages(pages: readonly NotificationPageDto[]): NotificationDto[] {
-  const byId = new Map<string, NotificationDto>();
-  for (const page of pages)
-    for (const item of page.data)
-      if (!byId.has(item.id)) byId.set(item.id, item);
-  return [...byId.values()].sort(
+function sortNotifications(
+  items: Iterable<NotificationDto>,
+): NotificationDto[] {
+  return [...items].sort(
     (left, right) =>
-      right.createdAt.localeCompare(left.createdAt) ||
+      new Date(parseOffsetTimestamp(right.createdAt)).getTime() -
+        new Date(parseOffsetTimestamp(left.createdAt)).getTime() ||
       right.id.localeCompare(left.id),
+  );
+}
+
+function reconcileAuthoritativeItems(
+  current: readonly NotificationDto[],
+  authoritative: readonly NotificationDto[],
+): NotificationDto[] {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of authoritative) byId.set(item.id, item);
+  return sortNotifications(byId.values());
+}
+
+function appendOlderItems(
+  current: readonly NotificationDto[],
+  older: readonly NotificationDto[],
+): NotificationDto[] {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of older) if (!byId.has(item.id)) byId.set(item.id, item);
+  return sortNotifications(byId.values());
+}
+
+function replaceLoadedItem(
+  current: readonly NotificationDto[],
+  authoritative: NotificationDto,
+): NotificationDto[] {
+  return sortNotifications(
+    current.map((item) =>
+      item.id === authoritative.id ? authoritative : item,
+    ),
+  );
+}
+
+function reconcileMarkAll(
+  current: readonly NotificationDto[],
+  cutoffAt: string,
+  unreadOnly: boolean,
+): NotificationDto[] {
+  const cutoff = new Date(parseOffsetTimestamp(cutoffAt)).getTime();
+  const reconciled = current.map((item) =>
+    item.readAt === null &&
+    new Date(parseOffsetTimestamp(item.createdAt)).getTime() <= cutoff
+      ? { ...item, readAt: cutoffAt }
+      : item,
+  );
+  return sortNotifications(
+    unreadOnly ? reconciled.filter((item) => item.readAt === null) : reconciled,
   );
 }
 

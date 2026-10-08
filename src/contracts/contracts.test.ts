@@ -9,6 +9,7 @@ import {
   isContractConfidenceLevel,
   isIdempotentCommandRouteGroup,
   isMandatorySensitiveDocumentCategory,
+  isMarkAllNotificationsReadDto,
   isPermissionKey,
   mandatorySensitiveDocumentCategories,
   notificationCategories,
@@ -132,6 +133,47 @@ describe("backend contract DTO foundation", () => {
     expect(isNotificationDto({ ...notification, readAt: "yesterday" })).toBe(
       false,
     );
+  });
+
+  test("strictly validates notification offset timestamps and real calendar dates", () => {
+    const base = {
+      id: "notification_timestamp",
+      eventType: "CheckInDue",
+      notificationType: "CHECK_IN_DUE",
+      category: "CHECK_IN",
+      title: "Check-in due",
+      body: "Your check-in is due.",
+      payload: {},
+      readAt: null,
+      createdAt: "2026-02-28T23:59:59Z",
+    };
+    expect(isNotificationDto(base)).toBe(true);
+    expect(
+      isNotificationDto({
+        ...base,
+        createdAt: "2026-10-08T20:00:00+03:00",
+        readAt: "2024-02-29T12:30:00Z",
+      }),
+    ).toBe(true);
+    for (const timestamp of [
+      "2026-02-29T00:00:00Z",
+      "2026-02-31T00:00:00Z",
+      "2026-04-31T00:00:00Z",
+      "2026-13-01T00:00:00Z",
+      "2026-01-01T00:00:00",
+      "2026-01-01T24:00:00Z",
+      "2026-01-01T23:60:00Z",
+      "2026-01-01T23:59:60Z",
+    ]) {
+      expect(isNotificationDto({ ...base, createdAt: timestamp })).toBe(false);
+      expect(isNotificationDto({ ...base, readAt: timestamp })).toBe(false);
+      expect(
+        isMarkAllNotificationsReadDto({
+          affectedCount: 1,
+          cutoffAt: timestamp,
+        }),
+      ).toBe(false);
+    }
   });
 
   test("keeps audited permission identifiers explicit and role-free", () => {
