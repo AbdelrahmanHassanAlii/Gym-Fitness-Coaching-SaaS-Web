@@ -96,6 +96,7 @@ export async function getGymDashboard(
     isGymDashboardDto,
     "gym dashboard",
     signal,
+    { workspaceId },
   );
 }
 export async function getTrainerDashboard(
@@ -111,6 +112,7 @@ export async function getTrainerDashboard(
     isTrainerDashboardDto,
     "trainer dashboard",
     signal,
+    { workspaceId },
   );
 }
 export async function getRelationshipDashboard(
@@ -126,6 +128,7 @@ export async function getRelationshipDashboard(
     isRelationshipDashboardDto,
     "relationship dashboard",
     signal,
+    { relationshipId, workspaceId },
   );
 }
 export async function getTrainingAnalytics(
@@ -142,6 +145,7 @@ export async function getTrainingAnalytics(
     isTrainingAnalyticsDto,
     "training analytics",
     signal,
+    { relationshipId, workspaceId },
   );
 }
 export async function getProgressAnalytics(
@@ -158,6 +162,7 @@ export async function getProgressAnalytics(
     isProgressAnalyticsDto,
     "progress analytics",
     signal,
+    { relationshipId, workspaceId },
   );
 }
 export async function getNutritionAnalytics(
@@ -174,6 +179,7 @@ export async function getNutritionAnalytics(
     isNutritionAnalyticsDto,
     "nutrition analytics",
     signal,
+    { relationshipId, workspaceId },
   );
 }
 export async function getAdherenceAnalytics(
@@ -190,6 +196,7 @@ export async function getAdherenceAnalytics(
     isAdherenceAnalyticsDto,
     "adherence analytics",
     signal,
+    { relationshipId, workspaceId },
   );
 }
 export async function listAnalyticsRelationships(
@@ -209,6 +216,11 @@ export async function listAnalyticsRelationships(
     throw new ApiError({
       kind: "malformed-response",
       message: "Malformed analytics relationships response.",
+    });
+  if (envelope.data.some((item) => item.workspaceId !== workspaceId))
+    throw new ApiError({
+      kind: "malformed-response",
+      message: "Mismatched analytics relationship workspace.",
     });
   return envelope.data.filter(
     (item) => item.status === "ACTIVE" || item.status === "NEEDS_REASSIGNMENT",
@@ -235,6 +247,15 @@ export async function listAnalyticsMetrics(
       kind: "malformed-response",
       message: "Malformed analytics metrics response.",
     });
+  if (
+    page.data.some(
+      (item) => item.scope !== "SYSTEM" && item.workspaceId !== workspaceId,
+    )
+  )
+    throw new ApiError({
+      kind: "malformed-response",
+      message: "Mismatched analytics metric workspace.",
+    });
   return {
     data: page.data.filter((item) => item.status === "ACTIVE"),
     nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
@@ -254,6 +275,7 @@ async function get<T>(
   guard: (value: unknown) => value is T,
   label: string,
   signal?: AbortSignal,
+  expected?: { relationshipId?: string; workspaceId: string },
 ): Promise<T> {
   const queryString = serializeQueryParams(query as never);
   const envelope = await api.request<{ data: unknown }>({
@@ -265,6 +287,18 @@ async function get<T>(
     throw new ApiError({
       kind: "malformed-response",
       message: `Malformed ${label} response.`,
+    });
+  if (
+    expected &&
+    ((envelope.data as { workspaceId?: unknown }).workspaceId !==
+      expected.workspaceId ||
+      (expected.relationshipId !== undefined &&
+        (envelope.data as { relationshipId?: unknown }).relationshipId !==
+          expected.relationshipId))
+  )
+    throw new ApiError({
+      kind: "malformed-response",
+      message: `Mismatched ${label} identity.`,
     });
   return envelope.data;
 }

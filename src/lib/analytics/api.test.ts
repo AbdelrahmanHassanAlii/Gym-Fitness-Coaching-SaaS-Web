@@ -124,6 +124,15 @@ describe("analytics API", () => {
     await expect(getGymDashboard(api, "workspace_a", {})).rejects.toMatchObject(
       { kind: "malformed-response" },
     );
+
+    const mismatched = {
+      request: vi.fn().mockResolvedValue({
+        data: { ...gymDashboard(), workspaceId: "workspace_b" },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getGymDashboard(mismatched, "workspace_a", {}),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
   });
 
   test("uses the exact read-only selector routes and retains only authorized active targets", async () => {
