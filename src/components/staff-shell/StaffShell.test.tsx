@@ -421,6 +421,7 @@ describe("staff shell", () => {
     expect(permissions).toEqual(
       expect.arrayContaining([
         "nutrition.plans.read",
+        "documents.read",
         "foods.read",
         "adherence.read",
         "analytics.nutrition.read",
@@ -435,7 +436,7 @@ describe("staff shell", () => {
       ]),
     );
     expect(permissions).not.toContain("health.food_allergies.read");
-    expect(effectiveAccessCall?.body.requests.length).toBe(17);
+    expect(effectiveAccessCall?.body.requests.length).toBe(18);
     expect(effectiveAccessCall?.body.requests.length).toBeLessThanOrEqual(25);
   });
 

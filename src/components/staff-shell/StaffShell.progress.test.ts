@@ -6,8 +6,8 @@ describe("progress shell decisions", () => {
     const requests = currentUserDecisionRequestsForPath("/app/progress");
     const permissions = requests.map((request) => request.permission).sort();
 
-    expect(requests).toHaveLength(17);
-    expect(new Set(permissions).size).toBe(17);
+    expect(requests).toHaveLength(18);
+    expect(new Set(permissions).size).toBe(18);
     expect(permissions).toEqual(
       [
         "adherence.read",
@@ -16,6 +16,7 @@ describe("progress shell decisions", () => {
         "analytics.progress.read",
         "billing.subscription.read",
         "checkins.read",
+        "documents.read",
         "foods.read",
         "health.food_allergies.read",
         "health.read",

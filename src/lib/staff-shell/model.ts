@@ -116,6 +116,7 @@ const progressNavPermissions = [
 ] as const satisfies readonly PermissionKey[];
 
 const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
+  documents: "/app/documents",
   leads: "/app/leads",
   nutrition: "/app/nutrition",
   progress: "/app/progress",

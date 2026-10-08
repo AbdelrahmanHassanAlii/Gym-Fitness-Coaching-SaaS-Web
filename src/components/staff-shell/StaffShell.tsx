@@ -399,6 +399,7 @@ export function currentUserDecisionRequestsForPath(
     "billing.subscription.read",
     "adherence.read",
     "analytics.nutrition.read",
+    "documents.read",
     "foods.read",
     "nutrition.plans.read",
     "programs.read",
@@ -494,6 +495,19 @@ export function currentUserDecisionRequestsForPath(
       "checkins.read",
       "analytics.progress.read",
       "analytics.adherence.read",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
+  if (pathname.startsWith("/app/documents")) {
+    for (const permission of [
+      "documents.upload",
+      "documents.delete",
+      "files.download",
+      "medical_documents.read",
+      "medical_documents.upload",
+      "medical_documents.download",
     ] satisfies PermissionKey[]) {
       requests.set(permission, workspaceRequest(permission));
     }
