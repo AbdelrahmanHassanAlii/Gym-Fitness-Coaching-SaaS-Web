@@ -1,5 +1,6 @@
 export {
   accessRequirement,
+  analyticsNavPermissions,
   createStaffNavigation,
   createStaffShellContext,
   isStaffExperienceRole,

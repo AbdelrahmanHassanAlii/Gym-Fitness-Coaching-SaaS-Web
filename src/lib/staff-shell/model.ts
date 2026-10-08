@@ -85,7 +85,6 @@ const futureNavItems = [
 
 const permissionByNavItem: Partial<Record<StaffShellNavItemId, PermissionKey>> =
   {
-    analytics: "dashboard.gym.read",
     documents: "documents.read",
     leads: "billing.subscription.read",
     nutrition: "nutrition.plans.read",
@@ -115,8 +114,19 @@ const progressNavPermissions = [
   "analytics.adherence.read",
 ] as const satisfies readonly PermissionKey[];
 
+export const analyticsNavPermissions = [
+  "dashboard.gym.read",
+  "dashboard.trainer.read",
+  "dashboard.relationship.read",
+  "analytics.training.read",
+  "analytics.progress.read",
+  "analytics.nutrition.read",
+  "analytics.adherence.read",
+] as const satisfies readonly PermissionKey[];
+
 const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
   documents: "/app/documents",
+  analytics: "/app/analytics",
   leads: "/app/leads",
   nutrition: "/app/nutrition",
   notifications: "/app/notifications",
@@ -205,9 +215,9 @@ export function createStaffNavigation({
       const status =
         id === "notifications"
           ? notificationAccessStatus(accessFacts, context)
-          : id === "nutrition"
+          : id === "analytics"
             ? aggregateAccessStatus(
-                nutritionNavPermissions.map((item) =>
+                analyticsNavPermissions.map((item) =>
                   accessStatus(
                     evaluateAccess(
                       accessFacts,
@@ -216,9 +226,9 @@ export function createStaffNavigation({
                   ),
                 ),
               )
-            : id === "progress"
+            : id === "nutrition"
               ? aggregateAccessStatus(
-                  progressNavPermissions.map((item) =>
+                  nutritionNavPermissions.map((item) =>
                     accessStatus(
                       evaluateAccess(
                         accessFacts,
@@ -227,27 +237,40 @@ export function createStaffNavigation({
                     ),
                   ),
                 )
-              : permission === undefined
-                ? href === undefined
-                  ? "disabled"
-                  : "allowed"
-                : accessStatus(
-                    evaluateAccess(
-                      accessFacts,
-                      accessRequirement(context, permission),
+              : id === "progress"
+                ? aggregateAccessStatus(
+                    progressNavPermissions.map((item) =>
+                      accessStatus(
+                        evaluateAccess(
+                          accessFacts,
+                          accessRequirement(context, item),
+                        ),
+                      ),
                     ),
-                  );
+                  )
+                : permission === undefined
+                  ? href === undefined
+                    ? "disabled"
+                    : "allowed"
+                  : accessStatus(
+                      evaluateAccess(
+                        accessFacts,
+                        accessRequirement(context, permission),
+                      ),
+                    );
 
       return {
         description: labels[id].description,
         href,
         id,
         permission:
-          id === "nutrition"
-            ? nutritionNavPermissions
-            : id === "progress"
-              ? progressNavPermissions
-              : permission,
+          id === "analytics"
+            ? analyticsNavPermissions
+            : id === "nutrition"
+              ? nutritionNavPermissions
+              : id === "progress"
+                ? progressNavPermissions
+                : permission,
         status,
         title: labels[id].title,
       } satisfies StaffShellNavItem;

@@ -9,6 +9,7 @@ import type {
   RelationshipId,
   WorkspaceId,
 } from "@/contracts/common/ids";
+import { isOffsetTimestamp } from "@/lib/date-time";
 
 export const metricDefinitionScopes = ["SYSTEM", "GYM", "PRIVATE"] as const;
 export const metricDefinitionStatuses = ["ACTIVE", "ARCHIVED"] as const;
@@ -190,8 +191,15 @@ export interface ProgressAnalyticsDto {
   };
   points: readonly ProgressAnalyticsPointDto[];
   page: { hasMore: boolean; nextCursor: string | null };
-  buckets: readonly unknown[];
+  buckets: readonly ProgressAnalyticsBucketDto[];
   photoSummary: { count: number };
+}
+
+export interface ProgressAnalyticsBucketDto {
+  key: string;
+  from: string;
+  to: string;
+  latest: ProgressAnalyticsPointDto;
 }
 
 export interface ProgressAnalyticsPointDto {
@@ -309,8 +317,14 @@ export const isProgressAnalyticsDto = (
   typeof value.range.timezone === "string" &&
   id(value.metricDefinitionId) &&
   isRecord(value.summary) &&
+  (value.summary.firstInWindow === null ||
+    isProgressAnalyticsPointDto(value.summary.firstInWindow)) &&
+  (value.summary.latestInWindow === null ||
+    isProgressAnalyticsPointDto(value.summary.latestInWindow)) &&
   (value.summary.latest === null ||
     isProgressAnalyticsPointDto(value.summary.latest)) &&
+  nullableNumber(value.summary.delta) &&
+  nullableNumber(value.summary.percentChange) &&
   Array.isArray(value.points) &&
   value.points.every(isProgressAnalyticsPointDto) &&
   isRecord(value.page) &&
@@ -318,6 +332,7 @@ export const isProgressAnalyticsDto = (
   (value.page.nextCursor === null ||
     typeof value.page.nextCursor === "string") &&
   Array.isArray(value.buckets) &&
+  value.buckets.every(isProgressAnalyticsBucketDto) &&
   isRecord(value.photoSummary) &&
   version(value.photoSummary.count);
 
@@ -353,6 +368,18 @@ function isProgressAnalyticsPointDto(
   );
 }
 
+function isProgressAnalyticsBucketDto(
+  value: unknown,
+): value is ProgressAnalyticsBucketDto {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    timestamp(value.from) &&
+    timestamp(value.to) &&
+    isProgressAnalyticsPointDto(value.latest)
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -384,6 +411,10 @@ function optionalNumber(value: unknown): value is number | undefined {
   return value === undefined || number(value);
 }
 
+function nullableNumber(value: unknown): value is number | null {
+  return value === null || number(value);
+}
+
 function version(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -401,9 +432,7 @@ function optionalStringArray(
 }
 
 function timestamp(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const parsed = new Date(value as string);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  return typeof value === "string" && isOffsetTimestamp(value);
 }
 
 function localDate(value: unknown): value is string {

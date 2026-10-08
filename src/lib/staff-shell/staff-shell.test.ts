@@ -8,6 +8,7 @@ import type {
 } from "@/contracts";
 import {
   accessRequirement,
+  analyticsNavPermissions,
   createStaffNavigation,
   createStaffShellContext,
   isStaffExperienceRole,
@@ -139,6 +140,53 @@ describe("staff shell model", () => {
       ],
       status: "allowed",
     });
+  });
+
+  test("analytics navigation requires a data permission and ignores selector-only permissions", () => {
+    const workspace = selectStaffWorkspaces([
+      myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),
+    ])[0];
+    const context = createStaffShellContext({
+      branchLabel: "All",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const selectorOnly = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [
+          decision("trainees.read", true, "ALLOW"),
+          decision("metric_definitions.read", true, "ALLOW"),
+          ...analyticsNavPermissions.map((permission) =>
+            decision(permission, false, "DENY"),
+          ),
+        ],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    });
+    expect(selectorOnly.find((item) => item.id === "analytics")?.status).toBe(
+      "denied",
+    );
+
+    const usable = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [decision("analytics.training.read", true, "ALLOW")],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    });
+    expect(usable.find((item) => item.id === "analytics")?.href).toBe(
+      "/app/analytics",
+    );
+    expect(usable.find((item) => item.id === "analytics")?.status).toBe(
+      "allowed",
+    );
   });
 
   test("progress navigation uses any frozen readable panel permission", () => {

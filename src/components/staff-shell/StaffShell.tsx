@@ -513,6 +513,20 @@ export function currentUserDecisionRequestsForPath(
     }
   }
 
+  if (pathname.startsWith("/app/analytics")) {
+    for (const permission of [
+      "analytics.adherence.read",
+      "analytics.progress.read",
+      "analytics.training.read",
+      "dashboard.gym.read",
+      "dashboard.relationship.read",
+      "dashboard.trainer.read",
+      "metric_definitions.read",
+    ] satisfies PermissionKey[]) {
+      requests.set(permission, workspaceRequest(permission));
+    }
+  }
+
   return Array.from(requests.values());
 }
 

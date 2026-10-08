@@ -566,9 +566,9 @@ function nutritionResponse(path: string) {
         activePlan: { id: planId, name: "Cutting plan" },
         nutritionTracking: { averageAdherenceRate: 0.8, daysTracked: 1 },
         range: {
-          from: "2026-09-01",
+          from: "2026-08-31T21:00:00.000Z",
           timezone: "Africa/Cairo",
-          to: "2026-10-01",
+          to: "2026-09-30T21:00:00.000Z",
         },
         relationshipId,
         series: [

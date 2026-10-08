@@ -7,6 +7,7 @@ import type {
   RelationshipId,
   WorkspaceId,
 } from "@/contracts/common/ids";
+import { isOffsetTimestamp } from "@/lib/date-time";
 
 export const foodScopes = ["SYSTEM", "GYM", "PRIVATE"] as const;
 export const foodUnits = ["GRAM", "MILLILITER", "UNIT", "SERVING"] as const;
@@ -361,8 +362,8 @@ export const isNutritionAnalyticsDto = (
   idField(value.workspaceId) &&
   idField(value.relationshipId) &&
   isRecord(value.range) &&
-  localDate(value.range.from) &&
-  localDate(value.range.to) &&
+  timestamp(value.range.from) &&
+  timestamp(value.range.to) &&
   typeof value.range.timezone === "string" &&
   (value.activePlan === null ||
     (isRecord(value.activePlan) &&
@@ -567,9 +568,7 @@ function localDate(value: unknown): value is string {
 }
 
 function timestamp(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  return typeof value === "string" && isOffsetTimestamp(value);
 }
 
 function optionalTimestamp(value: unknown): value is string | undefined {
