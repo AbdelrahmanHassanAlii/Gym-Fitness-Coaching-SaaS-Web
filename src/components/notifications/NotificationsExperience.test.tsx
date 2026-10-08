@@ -661,6 +661,193 @@ describe("notification center", () => {
     ).toHaveTextContent("Check-in · Read");
   });
 
+  test("does not let a stale load-more response resurrect a not-found notification", async () => {
+    let resolveStalePage!: (value: unknown) => void;
+    const stalePage = new Promise((resolve) => {
+      resolveStalePage = resolve;
+    });
+    const stale = notification(
+      "stale-pagination",
+      "2026-01-01T00:00:00Z",
+      null,
+      "CHECK_IN_DUE",
+    );
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: [
+          notification("current", "2026-01-03T00:00:00Z", null, "CHECK_IN_DUE"),
+        ],
+        page: { nextCursor: "older" },
+      })
+      .mockResolvedValueOnce({
+        data: [stale],
+        page: { nextCursor: "oldest" },
+      })
+      .mockReturnValueOnce(stalePage)
+      .mockRejectedValueOnce(
+        new ApiError({
+          category: "not-found",
+          code: "NOTIFICATION_NOT_FOUND",
+          kind: "backend",
+          message: "gone",
+          status: 404,
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: [
+          notification("current", "2026-01-03T00:00:00Z", null, "CHECK_IN_DUE"),
+        ],
+        page: { nextCursor: null },
+      });
+    renderExperience();
+    await screen.findByText("current title");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    const staleRow = (
+      await screen.findByText("stale-pagination title")
+    ).closest("li");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(staleRow!.querySelector("button")!);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("stale-pagination title"),
+      ).not.toBeInTheDocument(),
+    );
+    await act(async () => {
+      resolveStalePage({ data: [stale], page: { nextCursor: null } });
+      await stalePage;
+    });
+    expect(
+      screen.queryByText("stale-pagination title"),
+    ).not.toBeInTheDocument();
+  });
+
+  test("does not let stale load-more data restore unread rows after mark-all", async () => {
+    let resolveStalePage!: (value: unknown) => void;
+    const stalePage = new Promise((resolve) => {
+      resolveStalePage = resolve;
+    });
+    const covered = notification(
+      "covered-pagination",
+      "2026-01-01T00:00:00Z",
+      null,
+      "CHECK_IN_DUE",
+    );
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({ data: [], page: { nextCursor: null } })
+      .mockResolvedValueOnce({
+        data: [
+          notification("current", "2026-01-03T00:00:00Z", null, "CHECK_IN_DUE"),
+        ],
+        page: { nextCursor: "older" },
+      })
+      .mockReturnValueOnce(stalePage)
+      .mockResolvedValueOnce({
+        data: { affectedCount: 2, cutoffAt: "2026-01-04T00:00:00Z" },
+      })
+      .mockResolvedValueOnce({ data: [], page: { nextCursor: null } });
+    renderExperience();
+    await screen.findByText(messages.en.notifications.empty.all);
+    fireEvent.click(screen.getByRole("tab", { name: "Unread" }));
+    await screen.findByText("current title");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm mark all" }));
+    await screen.findByText(/Notifications updated by the server: 2/);
+    await act(async () => {
+      resolveStalePage({ data: [covered], page: { nextCursor: null } });
+      await stalePage;
+    });
+    expect(
+      screen.queryByText("covered-pagination title"),
+    ).not.toBeInTheDocument();
+  });
+
+  test("ignores a stale cursor error after switching notification filters", async () => {
+    let rejectOldPage!: (reason: unknown) => void;
+    const oldPage = new Promise((_, reject) => {
+      rejectOldPage = reject;
+    });
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: [
+          notification("all-row", "2026-01-03T00:00:00Z", null, "CHECK_IN_DUE"),
+        ],
+        page: { nextCursor: "older" },
+      })
+      .mockReturnValueOnce(oldPage)
+      .mockResolvedValueOnce({
+        data: [
+          notification(
+            "unread-row",
+            "2026-01-02T00:00:00Z",
+            null,
+            "CHECK_IN_DUE",
+          ),
+        ],
+        page: { nextCursor: null },
+      });
+    renderExperience();
+    await screen.findByText("all-row title");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Unread" }));
+    await screen.findByText("unread-row title");
+    await act(async () => {
+      rejectOldPage(
+        new ApiError({
+          category: "validation",
+          code: "CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      );
+      await oldPage.catch(() => undefined);
+    });
+    expect(screen.getByText("unread-row title")).toBeInTheDocument();
+    expect(
+      screen.queryByText(messages.en.notifications.errors.cursor),
+    ).not.toBeInTheDocument();
+    expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3);
+  });
+
+  test("recovers the current chain from a current cursor error", async () => {
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: [
+          notification("initial", "2026-01-03T00:00:00Z", null, "CHECK_IN_DUE"),
+        ],
+        page: { nextCursor: "invalid" },
+      })
+      .mockRejectedValueOnce(
+        new ApiError({
+          category: "validation",
+          code: "CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: [
+          notification(
+            "recovered",
+            "2026-01-04T00:00:00Z",
+            null,
+            "CHECK_IN_DUE",
+          ),
+        ],
+        page: { nextCursor: null },
+      });
+    renderExperience();
+    await screen.findByText("initial title");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(
+      await screen.findByText(messages.en.notifications.errors.cursor),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("recovered title")).toBeInTheDocument();
+    expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3);
+  });
+
   test("does not let a late All response replace the Unread filter", async () => {
     let resolveAll!: (value: unknown) => void;
     const allRequest = new Promise((resolve) => {

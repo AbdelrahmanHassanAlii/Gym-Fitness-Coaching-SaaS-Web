@@ -132,6 +132,8 @@ function NotificationsContent({
     nextCursor: null,
     pagesLoaded: 0,
   });
+  const activeFilterRef = useRef(filter);
+  const nextCursorRef = useRef(loadedChain.nextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [markAllPending, setMarkAllPending] = useState(false);
@@ -149,6 +151,12 @@ function NotificationsContent({
     },
     [],
   );
+  useEffect(() => {
+    activeFilterRef.current = filter;
+  }, [filter]);
+  useEffect(() => {
+    nextCursorRef.current = loadedChain.nextCursor;
+  }, [loadedChain.nextCursor]);
 
   const principalId = state.status === "authenticated" ? state.user.id : null;
   const currentIdentity = Boolean(
@@ -215,7 +223,10 @@ function NotificationsContent({
     if (next === filter) return;
     paginationGenerationRef.current += 1;
     reconciliationGenerationRef.current += 1;
+    activeFilterRef.current = next;
+    nextCursorRef.current = null;
     setLoadedChain({ items: [], nextCursor: null, pagesLoaded: 0 });
+    setLoadingMore(false);
     setError(null);
     setMessage(null);
     setFilter(next);
@@ -255,14 +266,18 @@ function NotificationsContent({
       result.reconciliationGeneration !== reconciliationGenerationRef.current
     )
       return;
-    setLoadedChain((current) => ({
-      items: reconcileAuthoritativeItems(current.items, result.page.data),
-      nextCursor:
+    setLoadedChain((current) => {
+      const nextCursor =
         current.pagesLoaded > 1
           ? current.nextCursor
-          : result.page.page.nextCursor,
-      pagesLoaded: Math.max(1, current.pagesLoaded),
-    }));
+          : result.page.page.nextCursor;
+      nextCursorRef.current = nextCursor;
+      return {
+        items: reconcileAuthoritativeItems(current.items, result.page.data),
+        nextCursor,
+        pagesLoaded: Math.max(1, current.pagesLoaded),
+      };
+    });
   }, [firstPage.data]);
 
   const notifications = loadedChain.items;
@@ -275,6 +290,16 @@ function NotificationsContent({
     if (!currentIdentity || loadingMore || nextCursor === null) return;
     const capturedIdentity = identityToken;
     const capturedPagination = paginationGenerationRef.current;
+    const capturedReconciliation = reconciliationGenerationRef.current;
+    const capturedFilter = filter;
+    const capturedCursor = nextCursor;
+    const isCurrentRequest = () =>
+      mountedRef.current &&
+      identityRef.current === capturedIdentity &&
+      paginationGenerationRef.current === capturedPagination &&
+      reconciliationGenerationRef.current === capturedReconciliation &&
+      activeFilterRef.current === capturedFilter &&
+      nextCursorRef.current === capturedCursor;
     setLoadingMore(true);
     setError(null);
     try {
@@ -283,30 +308,27 @@ function NotificationsContent({
         limit: notificationsPageLimit,
         ...(unread ? { unread: true } : {}),
       });
-      if (
-        !mountedRef.current ||
-        identityRef.current !== capturedIdentity ||
-        paginationGenerationRef.current !== capturedPagination
-      )
-        return;
+      if (!isCurrentRequest()) return;
+      setLoadingMore(false);
+      nextCursorRef.current = page.page.nextCursor;
       setLoadedChain((current) => ({
         items: appendOlderItems(current.items, page.data),
         nextCursor: page.page.nextCursor,
         pagesLoaded: current.pagesLoaded + 1,
       }));
     } catch (loadError) {
-      if (!mountedRef.current || identityRef.current !== capturedIdentity)
-        return;
+      if (!isCurrentRequest()) return;
       if (isCursorError(loadError)) {
         paginationGenerationRef.current += 1;
         reconciliationGenerationRef.current += 1;
+        nextCursorRef.current = null;
         setLoadedChain({ items: [], nextCursor: null, pagesLoaded: 0 });
+        setLoadingMore(false);
         setError(labels.errors.cursor);
         await refetchFirstPage();
       } else setError(errorMessage(loadError, labels));
     } finally {
-      if (mountedRef.current && identityRef.current === capturedIdentity)
-        setLoadingMore(false);
+      if (isCurrentRequest()) setLoadingMore(false);
     }
   }
 
@@ -374,6 +396,7 @@ function NotificationsContent({
       notificationCommandRegistry.retire(logicalId);
       if (!mountedRef.current || identityRef.current !== captured) return;
       reconciliationGenerationRef.current += 1;
+      setLoadingMore(false);
       setLoadedChain((current) => ({
         ...current,
         items:
@@ -395,6 +418,7 @@ function NotificationsContent({
         setError(errorMessage(mutationError, labels));
         if (isNotificationNotFound(mutationError)) {
           reconciliationGenerationRef.current += 1;
+          setLoadingMore(false);
           setLoadedChain((current) => ({
             ...current,
             items: current.items.filter((item) => item.id !== notification.id),
@@ -432,6 +456,7 @@ function NotificationsContent({
       notificationCommandRegistry.retire(logicalId);
       if (!mountedRef.current || identityRef.current !== captured) return;
       reconciliationGenerationRef.current += 1;
+      setLoadingMore(false);
       setLoadedChain((current) => ({
         ...current,
         items: reconcileMarkAll(current.items, result.cutoffAt, unread),
