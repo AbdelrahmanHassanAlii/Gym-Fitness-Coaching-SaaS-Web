@@ -331,6 +331,51 @@ describe("staff shell model", () => {
     });
   });
 
+  test("exposes notifications only for a resolved current user staff identity without inventing a permission", () => {
+    const workspace = selectStaffWorkspaces([
+      myWorkspace({ roles: ["TRAINER"], workspaceId: workspaceA }),
+    ])[0];
+    const context = createStaffShellContext({
+      branchLabel: "All",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const ready = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        decisions: [],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context,
+      labels: navLabels,
+    }).find((item) => item.id === "notifications");
+    expect(ready).toMatchObject({
+      href: "/app/notifications",
+      permission: undefined,
+      status: "allowed",
+    });
+
+    const supportContext = createStaffShellContext({
+      accessContext: "support",
+      branchLabel: "All",
+      sessionGeneration: 1,
+      workspace,
+    });
+    const support = createStaffNavigation({
+      accessFacts: accessFactsFromDecision({
+        accessContext: "support",
+        decisions: [],
+        membershipId: membershipA,
+        sessionGeneration: 1,
+        workspaceId: workspaceA,
+      }),
+      context: supportContext,
+      labels: navLabels,
+    }).find((item) => item.id === "notifications");
+    expect(support).toMatchObject({ status: "denied" });
+  });
+
   test("branch context stays scoped to the selected branch", () => {
     const workspace = selectStaffWorkspaces([
       myWorkspace({ roles: ["GYM_MANAGER"], workspaceId: workspaceA }),

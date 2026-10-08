@@ -321,7 +321,12 @@ describe("staff shell", () => {
         name: /Progress & check-insMeasurements, adherence, health, notes, and check-ins/i,
       }),
     ).toHaveAttribute("href", "/app/progress");
-    for (const label of ["Staff", "Documents", "Notifications", "Analytics"]) {
+    expect(
+      screen.getByRole("link", {
+        name: /NotificationsNotification inbox and read state/i,
+      }),
+    ).toHaveAttribute("href", "/app/notifications");
+    for (const label of ["Staff", "Documents", "Analytics"]) {
       expect(
         screen.queryByRole("link", { name: new RegExp(`^${label}\\b`, "i") }),
       ).not.toBeInTheDocument();
@@ -393,6 +398,57 @@ describe("staff shell", () => {
       ).size,
     );
     expect(effectiveAccessCall?.body.requests.length).toBeLessThanOrEqual(25);
+  });
+
+  test("notifications route preserves the exact ten-item base Route A set", async () => {
+    mocks.pathname = "/app/notifications";
+    mockWorkspaces([staffWorkspace], {
+      denied: [
+        "billing.subscription.read",
+        "adherence.read",
+        "analytics.nutrition.read",
+        "documents.read",
+        "foods.read",
+        "nutrition.plans.read",
+        "programs.read",
+        "staff.read",
+        "trainees.read",
+        "workspace.read",
+      ],
+    });
+    renderStaffShell();
+    expect(await screen.findByText("Summit Gym")).toBeInTheDocument();
+    const effectiveAccessCall = await waitFor(() => {
+      const call = mocks.authSession.apiClient.request.mock.calls
+        .map((entry) => entry[0])
+        .find((options) =>
+          String(options.path).endsWith("/me/effective-access/decisions"),
+        );
+      expect(call).toBeDefined();
+      return call;
+    });
+    expect(
+      effectiveAccessCall.body.requests.map(
+        (request: { permission: string }) => request.permission,
+      ),
+    ).toEqual([
+      "adherence.read",
+      "analytics.nutrition.read",
+      "billing.subscription.read",
+      "documents.read",
+      "foods.read",
+      "nutrition.plans.read",
+      "programs.read",
+      "staff.read",
+      "trainees.read",
+      "workspace.read",
+    ]);
+    expect(effectiveAccessCall.body.requests).toHaveLength(10);
+    expect(
+      await screen.findByRole("link", {
+        name: /NotificationsNotification inbox and read state/i,
+      }),
+    ).toHaveAttribute("href", "/app/notifications");
   });
 
   test("nutrition route requests the frozen read and action decisions within the Stage 19 batch limit", async () => {

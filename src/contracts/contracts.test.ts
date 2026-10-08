@@ -11,6 +11,9 @@ import {
   isMandatorySensitiveDocumentCategory,
   isPermissionKey,
   mandatorySensitiveDocumentCategories,
+  notificationCategories,
+  isNotificationDto,
+  isNotificationPageDto,
   permissionContexts,
   permissionEffects,
   permissionKeys,
@@ -80,6 +83,55 @@ describe("backend contract DTO foundation", () => {
       "week",
       "month",
     ]);
+  });
+
+  test("keeps notification categories and public DTOs aligned with Stage 14", () => {
+    expect(notificationCategories).toEqual([
+      "TRAINING",
+      "WORKOUT",
+      "NUTRITION",
+      "CHECK_IN",
+      "DOCUMENT",
+      "RELATIONSHIP",
+      "SECURITY",
+      "SUBSCRIPTION",
+    ]);
+    const notification = {
+      id: "notification_a",
+      eventType: "CheckInDue",
+      notificationType: "CHECK_IN_DUE",
+      category: "CHECK_IN",
+      title: "Check-in due",
+      body: "Your check-in is due.",
+      payload: { checkinId: "checkin_a" },
+      readAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    expect(isNotificationDto(notification)).toBe(true);
+    expect(
+      isNotificationPageDto({
+        data: [notification],
+        page: { nextCursor: null },
+      }),
+    ).toBe(true);
+    expect(isNotificationDto({ ...notification, category: "DELIVERY" })).toBe(
+      false,
+    );
+    expect(
+      isNotificationDto({ ...notification, payload: { attempts: 2 } }),
+    ).toBe(false);
+    expect(
+      isNotificationDto({ ...notification, deliveryStatus: "RETRYING" }),
+    ).toBe(false);
+    expect(
+      isNotificationDto({ ...notification, payload: { providerError: "x" } }),
+    ).toBe(false);
+    expect(
+      isNotificationDto({ ...notification, createdAt: "2026-01-01" }),
+    ).toBe(false);
+    expect(isNotificationDto({ ...notification, readAt: "yesterday" })).toBe(
+      false,
+    );
   });
 
   test("keeps audited permission identifiers explicit and role-free", () => {

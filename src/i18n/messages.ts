@@ -118,7 +118,7 @@ export const messages = {
         },
         notifications: {
           title: "الإشعارات",
-          description: "سيتم تنفيذ الإشعارات لاحقًا",
+          description: "قائمة الإشعارات وحالة القراءة",
         },
         analytics: {
           title: "اللوحات والتحليلات",
@@ -132,6 +132,77 @@ export const messages = {
       overview: {
         title: "واجهة طاقم الجيم",
         copy: "هذه الواجهة تثبت التنقل، وسياق مساحة العمل، وحدود الوصول قبل تنفيذ شاشات المنتجات.",
+      },
+    },
+    notifications: {
+      title: "الإشعارات",
+      globalInbox:
+        "هذه قائمة الإشعارات العامة للمستخدم الحالي وقد تتضمن إشعارات من مساحات عمل أخرى.",
+      deliveryExplanation:
+        "حالة القراءة تخص الإشعار داخل التطبيق فقط، ولا تؤكد تسليم البريد الإلكتروني أو الإشعار الفوري أو قبول مزود الخدمة.",
+      loading: "جارٍ تحميل الإشعارات...",
+      loadingMore: "جارٍ تحميل المزيد...",
+      unreadLoaded: "غير مقروء ضمن الإشعارات المحملة: {count}",
+      moreMayExist: "قد توجد إشعارات إضافية لم يتم تحميلها بعد.",
+      dateLabel: "وقت إنشاء الإشعار",
+      navigation: {
+        unavailable: "الوجهة غير متاحة لصلاحياتك الحالية.",
+        wrongWorkspace: "اختر مساحة عمل الإشعار لفتح وجهته.",
+      },
+      tabs: { all: "الكل", unread: "غير المقروء" },
+      actions: {
+        refresh: "تحديث",
+        loadMore: "تحميل المزيد",
+        markRead: "تحديد كمقروء",
+        markAll: "تحديد الكل كمقروء",
+        openDestination: "فتح الوجهة",
+        cancel: "إلغاء",
+        confirmMarkAll: "تأكيد قراءة الكل",
+      },
+      confirm: {
+        title: "تحديد كل الإشعارات كمقروءة؟",
+        message:
+          "سيحدد الخادم الإشعارات الحالية حتى وقت فاصل جديد. الإشعارات الأحدث ستظل غير مقروءة.",
+      },
+      empty: {
+        all: "لا توجد إشعارات محملة.",
+        unread: "لا توجد إشعارات غير مقروءة محملة.",
+      },
+      status: {
+        read: "مقروء",
+        unread: "غير مقروء",
+        pending: "جارٍ التنفيذ...",
+      },
+      success: {
+        markedOne: "تم تحديث حالة القراءة.",
+        markedAll: "عدد الإشعارات التي حدّثها الخادم:",
+      },
+      errors: {
+        access: "تعذر التحقق من هوية الوصول الحالية.",
+        support: "مركز الإشعارات غير متاح في سياق الدعم.",
+        denied: "رفض الخادم الوصول إلى الإشعارات.",
+        unavailable:
+          "تعذر تحميل الإشعارات. احتفظنا بالبيانات الصالحة السابقة إن وجدت.",
+        malformed:
+          "أعاد الخادم بيانات إشعارات غير متوقعة، لذا توقفت الواجهة بأمان.",
+        cursor: "انتهت صلاحية موضع القائمة. أُعيد تحميل الصفحة الأولى.",
+        notFound: "لم يعد الإشعار متاحًا. تم تحديث القائمة.",
+        markOneAmbiguous:
+          "نتيجة تحديد الإشعار كمقروء غير معروفة. تم تحديث القائمة دون افتراض النجاح.",
+        markAllAmbiguous:
+          "نتيجة تحديد الكل غير معروفة. تم تحديث القائمة ولم يُعاد الطلب تلقائيًا.",
+        capacity:
+          "تعذر بدء أمر جديد مع وجود نتائج سابقة غير محسومة. حدّث الصفحة وراجع الحالة.",
+      },
+      categories: {
+        TRAINING: "التدريب",
+        WORKOUT: "التمارين",
+        NUTRITION: "التغذية",
+        CHECK_IN: "المتابعات",
+        DOCUMENT: "المستندات",
+        RELATIONSHIP: "العلاقات",
+        SECURITY: "الأمان",
+        SUBSCRIPTION: "الاشتراك",
       },
     },
     nutrition: {
@@ -938,7 +1009,7 @@ export const messages = {
         },
         notifications: {
           title: "Notifications",
-          description: "Notification workflows arrive in a later issue",
+          description: "Notification inbox and read state",
         },
         analytics: {
           title: "Dashboards & analytics",
@@ -952,6 +1023,77 @@ export const messages = {
       overview: {
         title: "Gym staff shell",
         copy: "This shell proves navigation, workspace context, and access boundaries before product screens are implemented.",
+      },
+    },
+    notifications: {
+      title: "Notifications",
+      globalInbox:
+        "This is the current user's global notification inbox and may include notifications from other workspaces.",
+      deliveryExplanation:
+        "Read status describes the in-app notification only. It does not confirm email or push delivery, provider acceptance, or provider sending.",
+      loading: "Loading notifications...",
+      loadingMore: "Loading more...",
+      unreadLoaded: "Unread among loaded notifications: {count}",
+      moreMayExist:
+        "More notifications may exist beyond the currently loaded pages.",
+      dateLabel: "Notification created",
+      navigation: {
+        unavailable: "The destination is unavailable for your current access.",
+        wrongWorkspace:
+          "Select the notification's workspace to open its destination.",
+      },
+      tabs: { all: "All", unread: "Unread" },
+      actions: {
+        refresh: "Refresh",
+        loadMore: "Load more",
+        markRead: "Mark read",
+        markAll: "Mark all read",
+        openDestination: "Open destination",
+        cancel: "Cancel",
+        confirmMarkAll: "Confirm mark all",
+      },
+      confirm: {
+        title: "Mark all notifications read?",
+        message:
+          "The server will mark current notifications through a new cutoff. Newer notifications remain unread.",
+      },
+      empty: {
+        all: "No notifications are loaded.",
+        unread: "No unread notifications are loaded.",
+      },
+      status: { read: "Read", unread: "Unread", pending: "Pending..." },
+      success: {
+        markedOne: "Read state updated.",
+        markedAll: "Notifications updated by the server:",
+      },
+      errors: {
+        access: "The current access identity could not be verified.",
+        support: "The notification center is unavailable in support context.",
+        denied: "The Backend denied notification access.",
+        unavailable:
+          "Notifications could not be loaded. Previously valid data was retained where possible.",
+        malformed:
+          "The Backend returned unexpected notification data, so the UI failed closed.",
+        cursor:
+          "The list position is no longer valid. The first page was reloaded.",
+        notFound:
+          "The notification is no longer available. The list was refreshed.",
+        markOneAmbiguous:
+          "The mark-read outcome is unknown. The list was refreshed without claiming success.",
+        markAllAmbiguous:
+          "The mark-all outcome is unknown. The list was refreshed and the request was not replayed.",
+        capacity:
+          "A new command cannot start while prior outcomes remain unresolved. Refresh and review the current state.",
+      },
+      categories: {
+        TRAINING: "Training",
+        WORKOUT: "Workout",
+        NUTRITION: "Nutrition",
+        CHECK_IN: "Check-in",
+        DOCUMENT: "Document",
+        RELATIONSHIP: "Relationship",
+        SECURITY: "Security",
+        SUBSCRIPTION: "Subscription",
       },
     },
     nutrition: {

@@ -3,7 +3,7 @@ import type {
   AccessFacts,
   AccessRequirement,
 } from "@/lib/access";
-import { evaluateAccess } from "@/lib/access";
+import { evaluateAccess, isCurrentAccessIdentity } from "@/lib/access";
 import type {
   BranchId,
   GymStaffRole,
@@ -119,6 +119,7 @@ const implementedNavItems: Partial<Record<StaffShellNavItemId, string>> = {
   documents: "/app/documents",
   leads: "/app/leads",
   nutrition: "/app/nutrition",
+  notifications: "/app/notifications",
   progress: "/app/progress",
   relationships: "/app/relationships",
   training: "/app/training",
@@ -202,17 +203,11 @@ export function createStaffNavigation({
       const href = implementedNavItems[id];
       const permission = permissionByNavItem[id];
       const status =
-        id === "nutrition"
-          ? aggregateAccessStatus(
-              nutritionNavPermissions.map((item) =>
-                accessStatus(
-                  evaluateAccess(accessFacts, accessRequirement(context, item)),
-                ),
-              ),
-            )
-          : id === "progress"
+        id === "notifications"
+          ? notificationAccessStatus(accessFacts, context)
+          : id === "nutrition"
             ? aggregateAccessStatus(
-                progressNavPermissions.map((item) =>
+                nutritionNavPermissions.map((item) =>
                   accessStatus(
                     evaluateAccess(
                       accessFacts,
@@ -221,16 +216,27 @@ export function createStaffNavigation({
                   ),
                 ),
               )
-            : permission === undefined
-              ? href === undefined
-                ? "disabled"
-                : "allowed"
-              : accessStatus(
-                  evaluateAccess(
-                    accessFacts,
-                    accessRequirement(context, permission),
+            : id === "progress"
+              ? aggregateAccessStatus(
+                  progressNavPermissions.map((item) =>
+                    accessStatus(
+                      evaluateAccess(
+                        accessFacts,
+                        accessRequirement(context, item),
+                      ),
+                    ),
                   ),
-                );
+                )
+              : permission === undefined
+                ? href === undefined
+                  ? "disabled"
+                  : "allowed"
+                : accessStatus(
+                    evaluateAccess(
+                      accessFacts,
+                      accessRequirement(context, permission),
+                    ),
+                  );
 
       return {
         description: labels[id].description,
@@ -247,6 +253,23 @@ export function createStaffNavigation({
       } satisfies StaffShellNavItem;
     }),
   ];
+}
+
+function notificationAccessStatus(
+  facts: AccessFacts | null | undefined,
+  context: StaffShellContext,
+): StaffShellAccessStatus {
+  if (context.accessContext !== "user") return "denied";
+  if (!facts || facts.status === "unresolved") return "unresolved";
+  if (facts.status === "error") return "unavailable";
+  return isCurrentAccessIdentity(facts, {
+    accessContext: context.accessContext,
+    membershipId: context.workspace.membershipId,
+    sessionGeneration: context.sessionGeneration,
+    workspaceId: context.workspace.workspaceId,
+  })
+    ? "allowed"
+    : "unresolved";
 }
 
 export function accessRequirement(
