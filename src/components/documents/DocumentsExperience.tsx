@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreateUploadIntentRequestDto,
@@ -8,6 +8,7 @@ import type {
   MembershipId,
   PermissionKey,
   RelationshipId,
+  UploadIntentDto,
   WorkspaceId,
 } from "@/contracts";
 import { isMandatorySensitiveDocumentCategory } from "@/contracts";
@@ -112,6 +113,10 @@ export type DocumentsLabels = {
 type CommandKind =
   "confirm" | "create-document" | "delete-document" | "upload-intent";
 type CommandEntry = { ambiguous: boolean; key: string; logicalId: string };
+type PendingConfirmation = {
+  body: CreateUploadIntentRequestDto;
+  intent: UploadIntentDto;
+};
 
 const commandKeysByLogicalId = new Map<string, CommandEntry>();
 const maxCommandKeys = 64;
@@ -167,6 +172,10 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
     fileId: string;
     body: CreateUploadIntentRequestDto;
   } | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingConfirmation | null>(null);
+  const flowGenerationRef = useRef(0);
+  const activeUploadAbortRef = useRef<AbortController | null>(null);
 
   const workspaceId = workspace?.workspaceId ?? null;
   const membershipId = workspace?.membershipId;
@@ -297,6 +306,9 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
   const uploadMutation = useMutation({
     mutationFn: uploadDocumentFlow,
     onError: (unknown) => {
+      if (isStaleFlowError(unknown)) {
+        return;
+      }
       setError(errorMessage(unknown, labels));
     },
     onSuccess: async () => {
@@ -304,6 +316,7 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
       setError(null);
       setUploadState("COMPLETE");
       setConfirmedFile(null);
+      setPendingConfirmation(null);
       setForm(initialForm);
       await invalidateDocuments();
     },
@@ -353,7 +366,48 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
     onError: (unknown) => setError(errorMessage(unknown, labels)),
   });
 
+  useEffect(
+    () => () => {
+      invalidateUploadFlow();
+    },
+    [],
+  );
+
+  function beginUploadFlow(): number {
+    flowGenerationRef.current += 1;
+    activeUploadAbortRef.current?.abort();
+    activeUploadAbortRef.current = null;
+    setUploadProgress({ indeterminate: false, value: null });
+    return flowGenerationRef.current;
+  }
+
+  function invalidateUploadFlow() {
+    flowGenerationRef.current += 1;
+    activeUploadAbortRef.current?.abort();
+    activeUploadAbortRef.current = null;
+  }
+
+  function ensureCurrentFlow(flowId: number) {
+    if (flowGenerationRef.current !== flowId) {
+      throw staleFlowError();
+    }
+  }
+
+  function guardedSet(flowId: number, update: () => void) {
+    if (flowGenerationRef.current === flowId) {
+      update();
+    }
+  }
+
+  function ensureIntentUsableForFlow(flowId: number, intent: UploadIntentDto) {
+    if (uploadIntentExpired(intent)) {
+      guardedSet(flowId, () => setUploadState("EXPIRED"));
+      throw expiredUploadIntentError(labels);
+    }
+  }
+
   async function uploadDocumentFlow() {
+    const flowId = beginUploadFlow();
     guardCommandContext({
       accessContext,
       membershipId,
@@ -394,47 +448,73 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
     });
     let fileId = confirmedFile?.fileId ?? null;
     let bodyForDocument = confirmedFile?.body ?? uploadBody;
+    const reusableConfirmation =
+      pendingConfirmation !== null &&
+      stableStringify(pendingConfirmation.body) === stableStringify(uploadBody)
+        ? pendingConfirmation
+        : null;
 
     if (
       fileId === null ||
       stableStringify(bodyForDocument) !== stableStringify(uploadBody)
     ) {
-      setUploadState("INTENT_CREATING");
-      const intent = await createUploadIntent(
-        apiClient,
-        workspaceId!,
-        uploadBody,
-        commandKey(uploadLogicalId),
-      );
-      retireCommandKey(uploadLogicalId);
-      setUploadState("INTENT_READY");
-      try {
-        setUploadState("UPLOADING");
-        await uploadProviderObject({
-          body: file,
-          headers: intent.uploadRequest.headers,
-          method: intent.uploadRequest.method,
-          onProgress: (progress) => {
-            setUploadProgress({
-              indeterminate: progress.indeterminate,
-              value:
-                progress.total && progress.total > 0
-                  ? (progress.loaded / progress.total) * 100
-                  : null,
-            });
-          },
-          url: intent.uploadRequest.url,
-        });
-      } catch (unknown) {
-        if (isApiError(unknown) && unknown.status === 412) {
-          setUploadState("UPLOAD_AMBIGUOUS");
-        } else if (isApiError(unknown) && unknown.kind === "network") {
-          setUploadState("UPLOAD_AMBIGUOUS");
-        } else {
-          setUploadState("PROVIDER_ERROR");
-          throw unknown;
+      let intent = reusableConfirmation?.intent ?? null;
+      if (intent === null) {
+        guardedSet(flowId, () => setUploadState("INTENT_CREATING"));
+        intent = await createUploadIntent(
+          apiClient,
+          workspaceId!,
+          uploadBody,
+          commandKey(uploadLogicalId),
+        );
+        ensureCurrentFlow(flowId);
+        retireCommandKey(uploadLogicalId);
+        setPendingConfirmation(null);
+        guardedSet(flowId, () => setUploadState("INTENT_READY"));
+        ensureIntentUsableForFlow(flowId, intent);
+
+        const controller = new AbortController();
+        activeUploadAbortRef.current = controller;
+        try {
+          guardedSet(flowId, () => setUploadState("UPLOADING"));
+          await uploadProviderObject({
+            body: file,
+            headers: intent.uploadRequest.headers,
+            method: intent.uploadRequest.method,
+            onProgress: (progress) => {
+              guardedSet(flowId, () =>
+                setUploadProgress({
+                  indeterminate: progress.indeterminate,
+                  value:
+                    progress.total && progress.total > 0
+                      ? (progress.loaded / progress.total) * 100
+                      : null,
+                }),
+              );
+            },
+            signal: controller.signal,
+            url: intent.uploadRequest.url,
+          });
+          ensureCurrentFlow(flowId);
+        } catch (unknown) {
+          ensureCurrentFlow(flowId);
+          if (isApiError(unknown) && unknown.status === 412) {
+            guardedSet(flowId, () => setUploadState("UPLOAD_AMBIGUOUS"));
+          } else if (isApiError(unknown) && unknown.kind === "network") {
+            guardedSet(flowId, () => setUploadState("UPLOAD_AMBIGUOUS"));
+          } else {
+            guardedSet(flowId, () => setUploadState("PROVIDER_ERROR"));
+            throw unknown;
+          }
+        } finally {
+          if (activeUploadAbortRef.current === controller) {
+            activeUploadAbortRef.current = null;
+          }
         }
+      } else {
+        ensureIntentUsableForFlow(flowId, intent);
       }
+
       const confirmLogicalId = commandLogicalId({
         accessContext,
         body: { expectedVersion: intent.expectedVersion },
@@ -444,7 +524,7 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
         principalId,
         workspaceId,
       });
-      setUploadState("CONFIRMING");
+      guardedSet(flowId, () => setUploadState("CONFIRMING"));
       try {
         const confirmed = await confirmUpload(
           apiClient,
@@ -453,14 +533,18 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
           { expectedVersion: intent.expectedVersion },
           commandKey(confirmLogicalId),
         );
+        ensureCurrentFlow(flowId);
         retireCommandKey(confirmLogicalId);
-        setUploadState("CONFIRMED");
+        guardedSet(flowId, () => setUploadState("CONFIRMED"));
         fileId = confirmed.file.id;
         bodyForDocument = uploadBody;
         setConfirmedFile({ body: uploadBody, fileId });
+        setPendingConfirmation(null);
       } catch (unknown) {
+        ensureCurrentFlow(flowId);
         markCommandAmbiguous(confirmLogicalId);
-        setUploadState("CONFIRM_UNKNOWN");
+        setPendingConfirmation({ body: uploadBody, intent });
+        guardedSet(flowId, () => setUploadState("CONFIRM_UNKNOWN"));
         throw unknown;
       }
     }
@@ -488,7 +572,7 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
       principalId,
       workspaceId,
     });
-    setUploadState("DOCUMENT_CREATING");
+    guardedSet(flowId, () => setUploadState("DOCUMENT_CREATING"));
     try {
       await createDocument(
         apiClient,
@@ -497,10 +581,12 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
         createBody,
         commandKey(createLogicalId),
       );
+      ensureCurrentFlow(flowId);
       retireCommandKey(createLogicalId);
     } catch (unknown) {
+      ensureCurrentFlow(flowId);
       markCommandAmbiguous(createLogicalId);
-      setUploadState("DOCUMENT_UNKNOWN");
+      guardedSet(flowId, () => setUploadState("DOCUMENT_UNKNOWN"));
       throw unknown;
     }
   }
@@ -541,9 +627,11 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
   }
 
   function resetUpload() {
+    invalidateUploadFlow();
     setUploadState("IDLE");
     setUploadProgress({ indeterminate: false, value: null });
     setConfirmedFile(null);
+    setPendingConfirmation(null);
     setError(null);
   }
 
@@ -573,11 +661,16 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
             disabled={
               !decisions.relationships.allowed || relationships.length === 0
             }
-            onChange={(event) =>
+            onChange={(event) => {
+              invalidateUploadFlow();
+              setConfirmedFile(null);
+              setPendingConfirmation(null);
+              setUploadProgress({ indeterminate: false, value: null });
+              setUploadState("IDLE");
               setSelectedRelationshipId(
                 event.currentTarget.value as RelationshipId,
-              )
-            }
+              );
+            }}
             value={activeRelationshipId ?? ""}
           >
             {relationships.length === 0 ? (
@@ -662,11 +755,18 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
           values: labels.values,
         }}
         onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
-        onFileChange={(file) => setForm((current) => ({ ...current, file }))}
+        onFileChange={(file) => {
+          invalidateUploadFlow();
+          setConfirmedFile(null);
+          setPendingConfirmation(null);
+          setUploadProgress({ indeterminate: false, value: null });
+          setUploadState("IDLE");
+          setForm((current) => ({ ...current, file }));
+        }}
         onRestart={resetUpload}
         onSubmit={() => {
           if (!uploadMutation.isPending) {
-            void uploadMutation.mutateAsync();
+            uploadMutation.mutate();
           }
         }}
         pending={uploadMutation.isPending}
@@ -682,7 +782,7 @@ function DocumentsContent({ labels }: { labels: DocumentsLabels }) {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
           if (deleteTarget !== null && !deleteMutation.isPending) {
-            void deleteMutation.mutateAsync(deleteTarget);
+            deleteMutation.mutate(deleteTarget);
           }
         }}
         pending={deleteMutation.isPending}
@@ -809,6 +909,39 @@ function markCommandAmbiguous(logicalId: string) {
 
 function retireCommandKey(logicalId: string) {
   commandKeysByLogicalId.delete(logicalId);
+}
+
+function uploadIntentExpired(intent: UploadIntentDto): boolean {
+  const expiresAt = parseTimestamp(intent.expiresAt);
+  const uploadUrlExpiresAt = parseTimestamp(intent.uploadUrlExpiresAt);
+  if (expiresAt === null || uploadUrlExpiresAt === null) {
+    return true;
+  }
+  return Math.min(expiresAt, uploadUrlExpiresAt) <= Date.now();
+}
+
+function parseTimestamp(value: string): number | null {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function expiredUploadIntentError(labels: DocumentsLabels): ApiError {
+  return new ApiError({
+    category: "validation",
+    code: "UPLOAD_INTENT_EXPIRED",
+    kind: "backend",
+    message: labels.errors.expired,
+  });
+}
+
+function staleFlowError(): Error {
+  return new Error("documents upload flow is stale");
+}
+
+function isStaleFlowError(error: unknown): boolean {
+  return (
+    error instanceof Error && error.message === "documents upload flow is stale"
+  );
 }
 
 function stableStringify(value: unknown): string {

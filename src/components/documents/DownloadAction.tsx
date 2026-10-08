@@ -1,27 +1,25 @@
-import type { AccessDecision } from "@/lib/access";
-
 export function DownloadAction({
-  decision,
+  allowed,
   disabledLabel,
   label,
   loadingLabel,
   onDownload,
   pending,
 }: {
-  decision: AccessDecision;
+  allowed: boolean;
   disabledLabel: string;
   label: string;
   loadingLabel: string;
   onDownload: () => void;
   pending: boolean;
 }) {
-  const disabled = pending || !decision.allowed;
+  const disabled = pending || !allowed;
   return (
     <button
       aria-label={label}
       disabled={disabled}
       onClick={onDownload}
-      title={decision.allowed ? label : disabledLabel}
+      title={allowed ? label : disabledLabel}
       type="button"
     >
       {pending ? loadingLabel : label}

@@ -56,8 +56,12 @@ export function DocumentsList({
         const sensitive =
           document.classification === "SENSITIVE" ||
           isMandatorySensitiveDocumentCategory(document.category);
-        const downloadDecision = sensitive ? canMedicalDownload : canDownload;
-        const deleteDecision = sensitive ? canMedicalUpload : canDelete;
+        const downloadAllowed = sensitive
+          ? canDownload.allowed && canMedicalDownload.allowed
+          : canDownload.allowed;
+        const deleteAllowed = sensitive
+          ? canDelete.allowed && canMedicalUpload.allowed
+          : canDelete.allowed;
         return (
           <li key={document.id}>
             <div
@@ -77,7 +81,7 @@ export function DocumentsList({
               </button>
               <div className={styles.actions}>
                 <DownloadAction
-                  decision={downloadDecision}
+                  allowed={downloadAllowed}
                   disabledLabel={labels.denied}
                   label={labels.actions.download}
                   loadingLabel={labels.loading}
@@ -85,9 +89,7 @@ export function DocumentsList({
                   pending={pendingDownloadId === document.id}
                 />
                 <button
-                  disabled={
-                    pendingDeleteId === document.id || !deleteDecision.allowed
-                  }
+                  disabled={pendingDeleteId === document.id || !deleteAllowed}
                   onClick={() => onDelete(document)}
                   type="button"
                 >
