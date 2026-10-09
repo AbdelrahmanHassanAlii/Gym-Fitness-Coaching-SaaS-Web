@@ -19,6 +19,7 @@ export const platformAccessKeys = {
     identity: PrincipalIdentity & {
       accessVersion: number;
       membershipId: MembershipId;
+      membershipStatus: "ACTIVE";
       requests: readonly PlatformDecisionRequestDto[];
     },
   ): AppQueryKey =>
@@ -26,6 +27,7 @@ export const platformAccessKeys = {
       accessContext: "USER",
       accessVersion: identity.accessVersion,
       membershipId: identity.membershipId,
+      membershipStatus: identity.membershipStatus,
       permissions: normalizePlatformDecisionRequests(identity.requests).map(
         ({ permission }) => permission,
       ),

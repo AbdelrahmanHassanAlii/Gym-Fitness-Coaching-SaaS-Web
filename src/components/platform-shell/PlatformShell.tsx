@@ -121,6 +121,7 @@ export function PlatformShell({
         ? platformAccessKeys.decisions({
             accessVersion: activeMembership.accessVersion,
             membershipId: activeMembership.id,
+            membershipStatus: "ACTIVE",
             principalId,
             requests: platformDecisionRequests,
             sessionGeneration: generation,

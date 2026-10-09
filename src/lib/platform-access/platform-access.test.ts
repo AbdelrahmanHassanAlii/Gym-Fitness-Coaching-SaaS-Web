@@ -234,6 +234,7 @@ describe("Platform access contracts", () => {
     const decisionsKey = platformAccessKeys.decisions({
       accessVersion: 7,
       membershipId,
+      membershipStatus: "ACTIVE",
       principalId,
       requests: platformDecisionRequests,
       sessionGeneration: 3,
@@ -241,6 +242,7 @@ describe("Platform access contracts", () => {
 
     expect(JSON.stringify(contextKey)).toContain("platform-context");
     expect(JSON.stringify(decisionsKey)).toContain(membershipId);
+    expect(JSON.stringify(decisionsKey)).toContain("ACTIVE");
     expect(JSON.stringify(decisionsKey)).toContain("audit.platform.read");
     expect(JSON.stringify(decisionsKey)).not.toMatch(
       /token|authorization|cookie|supportSessionId|signedUrl|secret/i,
@@ -255,6 +257,7 @@ describe("Platform access contracts", () => {
       platformAccessKeys.decisions({
         accessVersion: 8,
         membershipId,
+        membershipStatus: "ACTIVE",
         principalId,
         requests: platformDecisionRequests,
         sessionGeneration: 3,
@@ -264,6 +267,7 @@ describe("Platform access contracts", () => {
       platformAccessKeys.decisions({
         accessVersion: 7,
         membershipId: "platform_membership_b" as MembershipId,
+        membershipStatus: "ACTIVE",
         principalId,
         requests: platformDecisionRequests,
         sessionGeneration: 3,
