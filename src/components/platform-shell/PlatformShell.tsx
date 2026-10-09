@@ -72,6 +72,7 @@ const navigationPermissions = {
   users: "platform_users.read",
   workspaces: "platform_workspaces.manage",
 } as const satisfies Record<string, PlatformFoundationPermission>;
+const maxSafeTimerDelay = 2_147_483_647;
 
 export function PlatformShell({
   children,
@@ -197,22 +198,38 @@ export function PlatformShell({
     void refetchContext().finally(() => setRecovering(false));
   }, [decisionsQuery.error, decisionsQuery.errorUpdatedAt, refetchContext]);
 
-  const decisionIdentity = decisionFingerprint(decisionsQuery.data);
+  const decisionIdentity = decisionFingerprint(
+    decisionsQuery.data,
+    decisionKey,
+  );
   const decisionValidUntil = decisionsQuery.data?.validUntil ?? null;
   useEffect(() => {
     if (decisionValidUntil === null || decisionIdentity === null) return;
 
     const expiresAt = Date.parse(decisionValidUntil);
-    const expireAndRefresh = () => {
-      setExpiredDecisionIdentity(decisionIdentity);
-      void refetchDecisions();
+    let disposed = false;
+    let timer: number | undefined;
+    const scheduleNextWakeup = () => {
+      if (disposed) return;
+
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) {
+        setExpiredDecisionIdentity(decisionIdentity);
+        void refetchDecisions();
+        return;
+      }
+
+      timer = window.setTimeout(
+        scheduleNextWakeup,
+        Math.min(remaining, maxSafeTimerDelay),
+      );
     };
-    const delay = expiresAt - Date.now();
-    const timer = window.setTimeout(
-      expireAndRefresh,
-      Math.min(Math.max(delay, 0), 2_147_483_647),
-    );
-    return () => window.clearTimeout(timer);
+    scheduleNextWakeup();
+
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [decisionIdentity, decisionValidUntil, refetchDecisions]);
 
   const accessState = resolvePlatformAccessState({
@@ -425,9 +442,16 @@ function hasCode(error: unknown, code: string): boolean {
 
 function decisionFingerprint(
   decisions: PlatformEffectiveAccessDecisionsDto | undefined,
+  decisionKey: readonly unknown[] | null,
 ): string | null {
-  if (decisions === undefined || decisions.validUntil === null) return null;
-  return `${decisions.membershipId}:${decisions.accessVersion}:${decisions.validUntil}`;
+  if (
+    decisions === undefined ||
+    decisions.validUntil === null ||
+    decisionKey === null
+  ) {
+    return null;
+  }
+  return JSON.stringify([decisionKey, decisions.validUntil]);
 }
 
 function isDecisionExpired(

@@ -2,11 +2,16 @@
  * @vitest-environment jsdom
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { MembershipId, UserId } from "@/contracts";
 import type { AuthSessionContextValue, AuthState } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { messages } from "@/i18n/messages";
+import {
+  platformAccessKeys,
+  platformDecisionRequests,
+} from "@/lib/platform-access";
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { PlatformShell } from "./PlatformShell";
 
@@ -48,6 +53,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mocks.refresh }),
 }));
 
+const maxSafeTimerDelay = 2_147_483_647;
+
 describe("Platform shell", () => {
   beforeEach(() => {
     mocks.authSession.apiClient.request.mockReset();
@@ -55,6 +62,10 @@ describe("Platform shell", () => {
     mocks.authSession.markSessionExpired.mockReset();
     mocks.authSession.generation = 4;
     mocks.authSession.state = authenticatedState();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   test("loads the exact Platform contracts and shows only allowed navigation placeholders", async () => {
@@ -152,22 +163,64 @@ describe("Platform shell", () => {
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(1);
   });
 
-  test("recovers an access-version conflict through fresh context before new decisions", async () => {
+  test("hides existing authority throughout deferred access-version conflict recovery", async () => {
     mockActiveContext(7);
+    mockDecisions({
+      "audit.platform.read": false,
+      "platform_users.read": false,
+      "platform_workspaces.manage": true,
+    });
+    const refreshedContext = deferred<unknown>();
+    const refreshedDecisions = deferred<unknown>();
+    const queryClient = testQueryClient();
+
+    renderShell(queryClient);
+
+    expect(await screen.findByText("Workspaces")).toBeInTheDocument();
     mocks.authSession.apiClient.request.mockRejectedValueOnce(
       backendError("PLATFORM_MEMBERSHIP_ACCESS_VERSION_CONFLICT", 409),
     );
-    mockActiveContext(8);
-    mockDecisions(
-      {
-        "audit.platform.read": false,
-        "platform_users.read": true,
-        "platform_workspaces.manage": false,
-      },
-      8,
+    mocks.authSession.apiClient.request.mockReturnValueOnce(
+      refreshedContext.promise,
+    );
+    mocks.authSession.apiClient.request.mockReturnValueOnce(
+      refreshedDecisions.promise,
     );
 
-    renderShell();
+    void queryClient.invalidateQueries({
+      exact: true,
+      queryKey: platformAccessKeys.decisions({
+        accessVersion: 7,
+        membershipId: "platform_membership_a" as MembershipId,
+        membershipStatus: "ACTIVE",
+        principalId: "user_a" as UserId,
+        requests: platformDecisionRequests,
+        sessionGeneration: 4,
+      }),
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Workspaces")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Loading Platform context...")).toBeInTheDocument();
+
+    refreshedContext.resolve(contextEnvelope("ACTIVE", 8));
+    await waitFor(() =>
+      expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(5),
+    );
+    expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    expect(screen.queryByText("Users")).not.toBeInTheDocument();
+
+    refreshedDecisions.resolve(
+      decisionEnvelope(
+        {
+          "audit.platform.read": false,
+          "platform_users.read": true,
+          "platform_workspaces.manage": false,
+        },
+        8,
+      ),
+    );
 
     expect(await screen.findByText("Users")).toBeInTheDocument();
     expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
@@ -175,6 +228,7 @@ describe("Platform shell", () => {
       .map(([request]) => request.body)
       .filter(Boolean);
     expect(decisionBodies).toEqual([
+      expect.objectContaining({ expectedAccessVersion: 7 }),
       expect.objectContaining({ expectedAccessVersion: 7 }),
       expect.objectContaining({ expectedAccessVersion: 8 }),
     ]);
@@ -245,7 +299,8 @@ describe("Platform shell", () => {
     },
   );
 
-  test("retires decisions at validUntil and refetches without rendering expired navigation", async () => {
+  test("retires decisions exactly at validUntil and refetches without rendering expired navigation", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
     mockActiveContext(7);
     mockDecisions(
       {
@@ -254,7 +309,7 @@ describe("Platform shell", () => {
         "platform_workspaces.manage": true,
       },
       7,
-      new Date(Date.now() + 500).toISOString(),
+      "2026-10-09T08:01:00.000Z",
     );
     mockDecisions({
       "audit.platform.read": false,
@@ -265,17 +320,22 @@ describe("Platform shell", () => {
     renderShell();
 
     expect(await screen.findByText("Workspaces")).toBeInTheDocument();
-    await waitFor(
-      () => expect(screen.queryByText("Workspaces")).not.toBeInTheDocument(),
-      { timeout: 2_000 },
-    );
+
+    await timer.advanceBy(59_999);
+    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(2);
+
+    await timer.advanceBy(1);
+    await settleAsyncQueries();
+    expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(3);
     expect(
       screen.getByText("No Platform sections are available."),
     ).toHaveAttribute("role", "status");
   });
 
-  test("never treats an already-expired decision response as current authority", async () => {
+  test("keeps far-future authority through capped timer segments until the actual deadline", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
     mockActiveContext(7);
     mockDecisions(
       {
@@ -284,7 +344,116 @@ describe("Platform shell", () => {
         "platform_workspaces.manage": true,
       },
       7,
-      new Date(Date.now() - 1_000).toISOString(),
+      "2026-11-18T08:00:00.000Z",
+    );
+    mockDecisions({
+      "audit.platform.read": false,
+      "platform_users.read": true,
+      "platform_workspaces.manage": false,
+    });
+
+    renderShell();
+    expect(await screen.findByText("Workspaces")).toBeInTheDocument();
+
+    await timer.advanceBy(maxSafeTimerDelay);
+    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(2);
+
+    await timer.advanceBy(40 * 24 * 60 * 60 * 1_000 - maxSafeTimerDelay);
+    await settleAsyncQueries();
+    expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    expect(screen.getByText("Users")).toBeInTheDocument();
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(3);
+  });
+
+  test("an old authority timer cannot invalidate replacement decisions", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mockActiveContext(7);
+    mockDecisions(
+      {
+        "audit.platform.read": false,
+        "platform_users.read": false,
+        "platform_workspaces.manage": true,
+      },
+      7,
+      "2026-10-10T08:00:00.000Z",
+    );
+    const queryClient = testQueryClient();
+    const { rerender } = render(shellTree(queryClient));
+    expect(await screen.findByText("Workspaces")).toBeInTheDocument();
+
+    mocks.authSession.generation = 5;
+    mocks.authSession.state = authenticatedState({ userId: "user_b" });
+    mockContext("ACTIVE", 9, "platform_membership_b");
+    mocks.authSession.apiClient.request.mockResolvedValueOnce(
+      decisionEnvelope(
+        {
+          "audit.platform.read": false,
+          "platform_users.read": true,
+          "platform_workspaces.manage": false,
+        },
+        9,
+        "2026-11-18T08:00:00.000Z",
+        "platform_membership_b",
+      ),
+    );
+    rerender(shellTree(queryClient));
+    expect(await screen.findByText("Users")).toBeInTheDocument();
+
+    await timer.advanceBy(24 * 60 * 60 * 1_000);
+    expect(screen.getByText("Users")).toBeInTheDocument();
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(4);
+  });
+
+  test("null validUntil does not create an expiry refetch", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mockActiveContext(7);
+    mockDecisions({
+      "audit.platform.read": false,
+      "platform_users.read": false,
+      "platform_workspaces.manage": true,
+    });
+
+    renderShell();
+    expect(await screen.findByText("Workspaces")).toBeInTheDocument();
+
+    await timer.advanceBy(40 * 24 * 60 * 60 * 1_000);
+    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(2);
+  });
+
+  test("cleans up the expiry timer when the shell unmounts", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mockActiveContext(7);
+    mockDecisions(
+      {
+        "audit.platform.read": false,
+        "platform_users.read": false,
+        "platform_workspaces.manage": true,
+      },
+      7,
+      "2026-10-10T08:00:00.000Z",
+    );
+
+    const { unmount } = renderShell();
+    expect(await screen.findByText("Workspaces")).toBeInTheDocument();
+    unmount();
+
+    await timer.advanceBy(24 * 60 * 60 * 1_000);
+    expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(2);
+  });
+
+  test("never treats an already-expired decision response as current authority", async () => {
+    installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mockActiveContext(7);
+    mockDecisions(
+      {
+        "audit.platform.read": false,
+        "platform_users.read": false,
+        "platform_workspaces.manage": true,
+      },
+      7,
+      "2026-10-09T07:59:59.000Z",
     );
     mockDecisions({
       "audit.platform.read": false,
@@ -446,7 +615,9 @@ function shellTree(queryClient: QueryClient) {
 
 function testQueryClient() {
   return new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    defaultOptions: {
+      queries: { gcTime: Infinity, retry: false, staleTime: 0 },
+    },
   });
 }
 
@@ -525,6 +696,7 @@ function decisionEnvelope(
   >,
   accessVersion = 7,
   validUntil: string | null = null,
+  membershipId = "platform_membership_a",
 ) {
   return {
     data: {
@@ -538,7 +710,7 @@ function decisionEnvelope(
           effect: allowed ? "ALLOW" : "DENY",
           permission,
         })),
-      membershipId: "platform_membership_a",
+      membershipId,
       membershipStatus: "ACTIVE",
       validUntil,
     },
@@ -563,4 +735,64 @@ function deferred<T>() {
     reject = rejecter;
   });
   return { promise, reject, resolve };
+}
+
+async function settleAsyncQueries() {
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  }
+}
+
+function installPlatformTimerHarness(initialNow: string) {
+  let now = Date.parse(initialNow);
+  const timers = new Map<
+    Parameters<typeof window.clearTimeout>[0],
+    { callback: () => void; dueAt: number }
+  >();
+  const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+  const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.spyOn(window, "setTimeout").mockImplementation(
+    (handler, timeout?: number) => {
+      const delay = timeout ?? 0;
+      if (delay < 10_000) {
+        return nativeSetTimeout(handler, delay);
+      }
+
+      const timerId = nativeSetTimeout(() => undefined, maxSafeTimerDelay);
+      nativeClearTimeout(timerId);
+      timers.set(timerId, {
+        callback: () => handler(undefined),
+        dueAt: now + delay,
+      });
+      return timerId;
+    },
+  );
+  vi.spyOn(window, "clearTimeout").mockImplementation((timerId) => {
+    if (!timers.delete(timerId)) {
+      nativeClearTimeout(timerId);
+    }
+  });
+
+  return {
+    async advanceBy(milliseconds: number) {
+      now += milliseconds;
+      let dueTimers = [...timers.entries()]
+        .filter(([, timer]) => timer.dueAt <= now)
+        .sort(([, left], [, right]) => left.dueAt - right.dueAt);
+
+      while (dueTimers.length > 0) {
+        for (const [timerId, timer] of dueTimers) {
+          timers.delete(timerId);
+          await act(async () => timer.callback());
+        }
+        dueTimers = [...timers.entries()]
+          .filter(([, timer]) => timer.dueAt <= now)
+          .sort(([, left], [, right]) => left.dueAt - right.dueAt);
+      }
+    },
+  };
 }

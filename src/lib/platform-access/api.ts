@@ -11,6 +11,7 @@ import {
   platformMembershipStatuses,
 } from "@/contracts";
 import { ApiError, type ApiClient } from "@/lib/api";
+import { isOffsetTimestamp } from "@/lib/date-time";
 
 const platformDecisionLimit = 25;
 const platformPermissionSet = new Set<string>(platformFoundationPermissions);
@@ -208,9 +209,7 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isRfc3339Utc(value: unknown): value is string {
   return (
-    typeof value === "string" &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) &&
-    Number.isFinite(Date.parse(value))
+    typeof value === "string" && value.endsWith("Z") && isOffsetTimestamp(value)
   );
 }
 

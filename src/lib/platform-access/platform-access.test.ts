@@ -84,6 +84,45 @@ describe("Platform access contracts", () => {
       },
     },
     {
+      name: "impossible calendar timestamp",
+      value: {
+        accessContext: "USER",
+        context: "PLATFORM",
+        membership: {
+          accessVersion: 7,
+          id: membershipId,
+          status: "ACTIVE",
+          updatedAt: "2026-02-30T12:00:00Z",
+        },
+      },
+    },
+    {
+      name: "malformed offset timestamp",
+      value: {
+        accessContext: "USER",
+        context: "PLATFORM",
+        membership: {
+          accessVersion: 7,
+          id: membershipId,
+          status: "ACTIVE",
+          updatedAt: "2026-10-09T08:30:00+25:00",
+        },
+      },
+    },
+    {
+      name: "malformed timestamp shape",
+      value: {
+        accessContext: "USER",
+        context: "PLATFORM",
+        membership: {
+          accessVersion: 7,
+          id: membershipId,
+          status: "ACTIVE",
+          updatedAt: "2026-10-09 08:30:00Z",
+        },
+      },
+    },
+    {
       name: "access internals",
       value: {
         accessContext: "USER",
@@ -200,6 +239,18 @@ describe("Platform access contracts", () => {
     {
       name: "extra response material",
       patch: { profileId: "profile_a" },
+    },
+    {
+      name: "impossible validUntil calendar date",
+      patch: { validUntil: "2026-02-30T12:00:00Z" },
+    },
+    {
+      name: "malformed validUntil offset",
+      patch: { validUntil: "2026-10-09T08:30:00+25:00" },
+    },
+    {
+      name: "malformed validUntil shape",
+      patch: { validUntil: "2026-10-09 08:30:00Z" },
     },
   ])("fails closed for malformed decisions: $name", async ({ patch }) => {
     const data = {
