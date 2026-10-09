@@ -10,6 +10,7 @@ export * from "./common/pagination";
 export * from "./files/contracts";
 export * from "./notifications/contracts";
 export * from "./nutrition/contracts";
+export * from "./platform/contracts";
 export * from "./permissions/contracts";
 export * from "./progress/contracts";
 export * from "./relationships/contracts";

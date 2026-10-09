@@ -1,0 +1,28 @@
+.foundation {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 48rem;
+}
+
+.foundation h1,
+.foundation p {
+  margin: 0;
+}
+
+.foundation h1 {
+  font-size: clamp(2rem, 5vw, var(--font-size-xl));
+  line-height: var(--line-height-tight);
+}
+
+.foundation > p:not(.eyebrow) {
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+}
+
+.eyebrow {
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

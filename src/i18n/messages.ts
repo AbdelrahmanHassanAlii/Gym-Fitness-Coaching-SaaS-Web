@@ -134,6 +134,59 @@ export const messages = {
         copy: "هذه الواجهة تثبت التنقل، وسياق مساحة العمل، وحدود الوصول قبل تنفيذ شاشات المنتجات.",
       },
     },
+    platformPortal: {
+      portalLabel: "بوابة المنصة",
+      localeLabel: "لغة الواجهة",
+      retry: "إعادة المحاولة",
+      account: {
+        logout: "تسجيل الخروج",
+        restricted: "الجلسة مقيدة حتى اكتمال التحقق",
+      },
+      loading: {
+        access: "جارٍ التحقق من صلاحيات المنصة...",
+        context: "جارٍ تحميل سياق المنصة...",
+      },
+      errors: {
+        accessDenied: "لا تتوفر أقسام منصة لهذا الحساب.",
+        failed: "تعذر التحقق من الوصول إلى المنصة.",
+        malformed:
+          "أعاد الخادم بيانات وصول غير متوقعة، لذا توقفت الواجهة بأمان.",
+        membershipEnded: "انتهت عضوية المنصة لهذا الحساب.",
+        membershipRequired: "لا يملك هذا الحساب عضوية في المنصة.",
+        membershipSuspended: "عضوية المنصة لهذا الحساب معلقة.",
+        mfaRequired: "يلزم إكمال التحقق متعدد العوامل للوصول إلى المنصة.",
+        restricted: "يلزم إكمال التحقق من الجلسة قبل الوصول إلى المنصة.",
+        supportForbidden: "بوابة المنصة غير متاحة أثناء سياق الدعم.",
+      },
+      mobile: {
+        close: "إغلاق تنقل المنصة",
+        open: "فتح تنقل المنصة",
+      },
+      nav: {
+        home: {
+          title: "الرئيسية",
+          description: "أساس بوابة المنصة",
+        },
+        workspaces: {
+          title: "مساحات العمل",
+          description: "ستتوفر الإدارة في مرحلة لاحقة",
+        },
+        users: {
+          title: "المستخدمون",
+          description: "ستتوفر الإدارة في مرحلة لاحقة",
+        },
+        operations: {
+          title: "العمليات",
+          description: "مدخل مؤقت؛ ستتحدد وظائفه في مرحلة لاحقة",
+        },
+      },
+      home: {
+        title: "أساس بوابة المنصة",
+        copy: "واجهة مستقلة وآمنة للوصول إلى أقسام إدارة المنصة التي ستُنفذ في مراحل لاحقة.",
+        availableSections: "الأقسام المتاحة",
+        noSections: "لا تتوفر أقسام منصة لصلاحياتك الحالية.",
+      },
+    },
     notifications: {
       title: "الإشعارات",
       globalInbox:
@@ -1154,6 +1207,63 @@ export const messages = {
       overview: {
         title: "Gym staff shell",
         copy: "This shell proves navigation, workspace context, and access boundaries before product screens are implemented.",
+      },
+    },
+    platformPortal: {
+      portalLabel: "Platform Portal",
+      localeLabel: "Interface language",
+      retry: "Retry",
+      account: {
+        logout: "Log out",
+        restricted: "Session restricted until verification is complete",
+      },
+      loading: {
+        access: "Loading Platform access...",
+        context: "Loading Platform context...",
+      },
+      errors: {
+        accessDenied: "No Platform sections are available for this account.",
+        failed: "Platform access could not be verified.",
+        malformed:
+          "The Backend returned unexpected access data, so the portal failed closed.",
+        membershipEnded: "This account's Platform membership has ended.",
+        membershipRequired: "This account has no Platform membership.",
+        membershipSuspended: "This account's Platform membership is suspended.",
+        mfaRequired:
+          "Complete multi-factor authentication to access the Platform Portal.",
+        restricted:
+          "Complete session verification before accessing the Platform Portal.",
+        supportForbidden:
+          "The Platform Portal is unavailable in support context.",
+      },
+      mobile: {
+        close: "Close Platform navigation",
+        open: "Open Platform navigation",
+      },
+      nav: {
+        home: {
+          title: "Home",
+          description: "Platform Portal foundation",
+        },
+        workspaces: {
+          title: "Workspaces",
+          description: "Management arrives in a later milestone",
+        },
+        users: {
+          title: "Users",
+          description: "Management arrives in a later milestone",
+        },
+        operations: {
+          title: "Operations",
+          description: "Placeholder entry; final capabilities arrive later",
+        },
+      },
+      home: {
+        title: "Platform Portal foundation",
+        copy: "A separate, secure entry point for Platform management sections delivered in later milestones.",
+        availableSections: "Available sections",
+        noSections:
+          "No Platform sections are available for your current access.",
       },
     },
     notifications: {
