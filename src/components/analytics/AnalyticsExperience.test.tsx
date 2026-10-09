@@ -280,6 +280,64 @@ describe("analytics experience", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("discards a stale attention reset success after refresh", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    const staleReset = deferred<{ data: ReturnType<typeof gym> }>();
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_old",
+            "cursor-old",
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      })
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "ATTENTION_CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      )
+      .mockImplementationOnce(() => staleReset.promise)
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_fresh",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+
+    renderExperience();
+    await screen.findByText(/relationship_old/);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText(/relationship_fresh/);
+    await act(async () => {
+      staleReset.resolve({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_stale_reset",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+      await staleReset.promise;
+    });
+    expect(screen.getByText(/relationship_fresh/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/relationship_stale_reset/),
+    ).not.toBeInTheDocument();
+  });
+
   test("keeps parallel attention category completions atomically", async () => {
     mocks.staff = context(["dashboard.gym.read"]);
     const first = deferred<{ data: ReturnType<typeof gym> }>();
