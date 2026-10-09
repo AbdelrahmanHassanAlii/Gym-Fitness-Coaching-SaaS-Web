@@ -20,7 +20,12 @@ export function AnalyticsSeriesTable({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${String(row.key ?? row.id ?? index)}`}>
+            <tr
+              key={`${String(row.key ?? row.id ?? index)}`}
+              data-analytics-row-id={
+                typeof row.id === "string" ? row.id : undefined
+              }
+            >
               <th scope="row">
                 {formatHeading(row.key ?? row.measuredAt ?? index + 1, labels)}
               </th>
@@ -55,6 +60,7 @@ function formatValue(value: unknown, labels: Record<string, string>): string {
     return value ? (labels.yes ?? "Yes") : (labels.no ?? "No");
   if (typeof value === "object")
     return Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !nestedStructuralFields.has(key))
       .map(
         ([key, item]) =>
           `${labels[`field_${key}`] ?? key}: ${formatValue(item, labels)}`,
@@ -62,6 +68,12 @@ function formatValue(value: unknown, labels: Record<string, string>): string {
       .join(", ");
   return "—";
 }
+
+const nestedStructuralFields = new Set([
+  "id",
+  "metricDefinitionId",
+  "relationshipId",
+]);
 
 function formatHeading(value: unknown, labels: Record<string, string>) {
   const text = String(value);

@@ -258,6 +258,30 @@ function AnalyticsContent({
     metrics?.data.some(
       (item) => item.id === metricId && item.status === "ACTIVE",
     ) ?? false;
+  useEffect(() => {
+    if (
+      !metricId ||
+      metricsQuery.isFetching ||
+      !metricsQuery.isSuccess ||
+      !metrics ||
+      metrics.nextCursor !== null ||
+      validMetric
+    )
+      return;
+    const selectedMetricId = metricId;
+    const timer = window.setTimeout(
+      () =>
+        setMetricId((current) => (current === selectedMetricId ? "" : current)),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    metricId,
+    metrics,
+    metricsQuery.isFetching,
+    metricsQuery.isSuccess,
+    validMetric,
+  ]);
 
   const gymQuery = useQuery({
     enabled: Boolean(

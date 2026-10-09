@@ -134,7 +134,7 @@ describe("analytics experience", () => {
     expect(first.path).toBe("/workspaces/workspace_a/dashboard/gym");
     expect(first).not.toHaveProperty("body");
     expect(first).not.toHaveProperty("idempotencyKey");
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Load more" })[0]!);
     await waitFor(() =>
       expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(2),
     );
@@ -169,6 +169,7 @@ describe("analytics experience", () => {
             "cursor-a",
             "CHECKIN_OVERDUE",
           ),
+          NO_ACTIVE_PROGRAM: attentionPage("relationship_b", "cursor-b"),
         }),
       })
       .mockRejectedValueOnce(
@@ -187,11 +188,16 @@ describe("analytics experience", () => {
             "CHECKIN_OVERDUE",
           ),
         }),
+      })
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          NO_ACTIVE_PROGRAM: attentionPage("relationship_b2", null),
+        }),
       });
 
     renderExperience();
     await screen.findByRole("heading", { name: "Gym dashboard" });
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Load more" })[0]!);
     await waitFor(() =>
       expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3),
     );
@@ -208,6 +214,70 @@ describe("analytics experience", () => {
     expect(paths.every((path) => path.includes("branchId=branch_b"))).toBe(
       true,
     );
+    expect(screen.getByText(/relationship_b/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText(/relationship_b2/);
+    const siblingPath = String(
+      mocks.auth.apiClient.request.mock.calls.at(-1)?.[0].path,
+    );
+    expect(siblingPath).toContain("attentionCategory=NO_ACTIVE_PROGRAM");
+    expect(siblingPath).toContain("attentionCursor=cursor-b");
+    expect(siblingPath).toContain("branchId=branch_b");
+  });
+
+  test("discards a stale attention reset error after refresh", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    const staleReset = deferred<{ data: ReturnType<typeof gym> }>();
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_old",
+            "cursor-old",
+            "CHECKIN_OVERDUE",
+          ),
+          NO_ACTIVE_PROGRAM: attentionPage("relationship_sibling", null),
+        }),
+      })
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "ATTENTION_CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      )
+      .mockImplementationOnce(() => staleReset.promise)
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_fresh",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+          NO_ACTIVE_PROGRAM: attentionPage("relationship_sibling", null),
+        }),
+      });
+
+    renderExperience();
+    await screen.findByText(/relationship_old/);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText(/relationship_fresh/);
+    await act(async () => {
+      staleReset.reject(
+        new ApiError({ kind: "network", message: "stale reset failed" }),
+      );
+      await staleReset.promise.catch(() => undefined);
+    });
+    expect(screen.getByText(/relationship_fresh/)).toBeInTheDocument();
+    expect(screen.getByText(/relationship_sibling/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Analytics are unavailable."),
+    ).not.toBeInTheDocument();
   });
 
   test("keeps parallel attention category completions atomically", async () => {
@@ -391,8 +461,9 @@ describe("analytics experience", () => {
         const pageIndex = cursorMatch
           ? Number(cursorMatch[1]!.replace("opaque-page-", ""))
           : 0;
-        const start = pageIndex * 100;
-        const count = pageIndex === 5 ? 1 : 100;
+        const start =
+          pageIndex === 0 ? 0 : pageIndex === 1 ? 99 : pageIndex * 100 - 1;
+        const count = pageIndex === 5 ? 2 : 100;
         return Promise.resolve({
           data: progressAnalytics(
             "metric_a",
@@ -432,6 +503,13 @@ describe("analytics experience", () => {
     const rowHeaders = within(table).getAllByRole("rowheader");
     expect(rowHeaders[0]).toHaveTextContent("2026-01-01T00:00:00.000Z");
     expect(rowHeaders.at(-1)).toHaveTextContent("2026-01-01T08:20:00.000Z");
+    const pointIds = [...table.querySelectorAll("tbody tr")].map((row) =>
+      row.getAttribute("data-analytics-row-id"),
+    );
+    expect(pointIds).toEqual(
+      Array.from({ length: 501 }, (_, index) => `point-${index}`),
+    );
+    expect(new Set(pointIds)).toHaveLength(501);
     const progressPaths = mocks.auth.apiClient.request.mock.calls
       .map(([call]) => String(call.path))
       .filter((path) => path.includes("/analytics/progress"));
@@ -615,6 +693,167 @@ describe("analytics experience", () => {
     });
     expect(screen.getByText(/Value: 22/)).toBeInTheDocument();
     expect(screen.queryByText(/Value: 0 · Unit: kg/)).not.toBeInTheDocument();
+  });
+
+  test("clears a selected metric only after a current successful selector omission", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "metric_definitions.read",
+      "analytics.progress.read",
+    ]);
+    let metricRequests = 0;
+    let progressRequests = 0;
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.includes("/metric-definitions")) {
+        metricRequests += 1;
+        return Promise.resolve(
+          metricRequests === 2
+            ? metricsEnvelope([])
+            : metricsEnvelope([metric("metric_a")]),
+        );
+      }
+      if (value.includes("/analytics/progress")) {
+        progressRequests += 1;
+        return Promise.resolve({
+          data: progressAnalytics(
+            "metric_a",
+            progressPoints(0, 1, "metric_a"),
+            null,
+          ),
+        });
+      }
+      throw new Error(`unexpected request ${value}`);
+    });
+
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("option", { name: "Weight" });
+    const selector = screen.getByLabelText("Progress metric");
+    fireEvent.change(selector, { target: { value: "metric_a" } });
+    await screen.findByRole("heading", { name: "Progress analytics" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(selector).toHaveValue(""));
+    expect(
+      screen.queryByRole("option", { name: "Weight" }),
+    ).not.toBeInTheDocument();
+    const afterRemoval = progressRequests;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(metricRequests).toBeGreaterThanOrEqual(3));
+    expect(progressRequests).toBe(afterRemoval);
+    expect(selector).toHaveValue("");
+  });
+
+  test("does not clear a current metric for stale or failed selector refreshes", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "metric_definitions.read",
+      "analytics.progress.read",
+    ]);
+    const staleOmission = deferred<ReturnType<typeof metricsEnvelope>>();
+    let metricRequests = 0;
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.includes("/metric-definitions")) {
+        metricRequests += 1;
+        if (metricRequests === 1)
+          return Promise.resolve(metricsEnvelope([metric("metric_a")]));
+        if (metricRequests === 2) return staleOmission.promise;
+        if (metricRequests === 3)
+          return Promise.resolve(metricsEnvelope([metric("metric_a")]));
+        return Promise.reject(
+          new ApiError({ kind: "network", message: "offline" }),
+        );
+      }
+      if (value.includes("/analytics/progress"))
+        return Promise.resolve({
+          data: progressAnalytics(
+            "metric_a",
+            progressPoints(0, 1, "metric_a"),
+            null,
+          ),
+        });
+      throw new Error(`unexpected request ${value}`);
+    });
+
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("option", { name: "Weight" });
+    const selector = screen.getByLabelText("Progress metric");
+    fireEvent.change(selector, { target: { value: "metric_a" } });
+    await screen.findByRole("heading", { name: "Progress analytics" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(metricRequests).toBe(2));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(metricRequests).toBe(3));
+    expect(selector).toHaveValue("metric_a");
+    await act(async () => {
+      staleOmission.resolve(metricsEnvelope([]));
+      await staleOmission.promise;
+    });
+    expect(selector).toHaveValue("metric_a");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByRole("button", { name: "Retry" });
+    expect(selector).toHaveValue("metric_a");
+  });
+
+  test("localizes nested Arabic analytics fields without translating Backend summaries", async () => {
+    mocks.staff = context([
+      "dashboard.gym.read",
+      "trainees.read",
+      "dashboard.relationship.read",
+    ]);
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.endsWith("/dashboard/gym"))
+        return Promise.resolve({ data: gym(true, null) });
+      if (value.endsWith("/dashboard"))
+        return Promise.resolve({
+          data: {
+            ...relationshipDashboard(),
+            progress: progressAnalytics(
+              "metric_a",
+              progressPoints(0, 1, "metric_a"),
+              null,
+            ),
+            adherence: {
+              ...adherenceAnalytics(),
+              water: {
+                daysTracked: 1,
+                averageMl: 1_500,
+                targetMl: 2_000,
+              },
+            },
+          },
+        });
+      throw new Error(`unexpected request ${value}`);
+    });
+
+    renderExperience("ar");
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent("Workout completed"),
+    );
+    await screen.findByRole("option", {
+      name: `relationship_a · ${messages.ar.analyticsExperience.value_ACTIVE}`,
+    });
+    fireEvent.change(
+      screen.getByLabelText(messages.ar.analyticsExperience.relationship),
+      { target: { value: "relationship_a" } },
+    );
+    await screen.findByRole("heading", {
+      name: messages.ar.analyticsExperience.relationshipDashboard,
+    });
+    expect(document.body).toHaveTextContent("متوسط كمية الماء");
+    expect(document.body).toHaveTextContent("وقت القياس");
+    expect(document.body).not.toHaveTextContent("averageMl");
+    expect(document.body).not.toHaveTextContent("measuredAt");
+    expect(document.body).toHaveTextContent("Workout completed");
   });
 
   test("explicit refresh retires an older dashboard continuation", async () => {
@@ -846,15 +1085,15 @@ describe("analytics experience", () => {
   });
 });
 
-function renderExperience() {
+function renderExperience(locale: "ar" | "en" = "en") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <AnalyticsExperience
-        labels={messages.en.analyticsExperience}
-        locale="en"
+        labels={messages[locale].analyticsExperience}
+        locale={locale}
       />
     </QueryClientProvider>,
   );

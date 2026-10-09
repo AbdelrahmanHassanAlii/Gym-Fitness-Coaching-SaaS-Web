@@ -282,6 +282,21 @@ describe("analytics API", () => {
     ).rejects.toMatchObject({ kind: "malformed-response" });
   });
 
+  test("rejects a relationship-scoped response for a different relationship", async () => {
+    const api = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          ...trainingAnalytics(),
+          relationshipId: "relationship_b",
+        },
+      }),
+    } as unknown as ApiClient;
+
+    await expect(
+      getTrainingAnalytics(api, "workspace_a", "relationship_a", {}),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+  });
+
   test("fails closed on malformed nested Stage 18 analytics sections", async () => {
     const malformedPoint = {
       request: vi.fn().mockResolvedValue({
