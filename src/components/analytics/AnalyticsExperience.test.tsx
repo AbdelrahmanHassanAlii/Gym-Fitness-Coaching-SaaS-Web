@@ -1,9 +1,16 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { AuthState } from "@/lib/auth";
-import type { PermissionKey } from "@/contracts";
+import { isRelationshipDashboardDto, type PermissionKey } from "@/contracts";
 import type { StaffWorkspaceContextValue } from "@/lib/staff-shell";
 import { messages } from "@/i18n/messages";
 import {
@@ -12,6 +19,7 @@ import {
   analyticsRouteAPermissions,
 } from "./AnalyticsExperience";
 import { currentUserDecisionRequestsForPath } from "@/components/staff-shell/StaffShell";
+import { ApiError } from "@/lib/api";
 
 const mocks = vi.hoisted(() => ({
   auth: {
@@ -97,7 +105,9 @@ describe("analytics experience", () => {
 
     mocks.auth.apiClient.request.mockReset();
     mocks.staff = context(["analytics.progress.read", "trainees.read"]);
-    mocks.auth.apiClient.request.mockResolvedValueOnce({ data: [] });
+    mocks.auth.apiClient.request.mockResolvedValueOnce({
+      data: { data: [], meta: { hasMore: false, nextCursor: null } },
+    });
     renderExperience();
     await waitFor(() =>
       expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(1),
@@ -148,6 +158,692 @@ describe("analytics experience", () => {
     ).not.toBeInTheDocument();
     expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(1);
   });
+
+  test("preserves branch scope through attention continuation and cursor recovery", async () => {
+    mocks.staff = context(["dashboard.gym.read"], "user", "ready", "branch_b");
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_a",
+            "cursor-a",
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      })
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "ATTENTION_CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_reset",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+
+    renderExperience();
+    await screen.findByRole("heading", { name: "Gym dashboard" });
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3),
+    );
+    const paths = mocks.auth.apiClient.request.mock.calls.map(([call]) =>
+      String(call.path),
+    );
+    expect(paths[0]).toBe(
+      "/workspaces/workspace_a/dashboard/gym?branchId=branch_b",
+    );
+    expect(paths[1]).toContain("attentionCategory=CHECKIN_OVERDUE");
+    expect(paths[1]).toContain("attentionCursor=cursor-a");
+    expect(paths[2]).toContain("attentionCategory=CHECKIN_OVERDUE");
+    expect(paths[2]).not.toContain("attentionCursor=");
+    expect(paths.every((path) => path.includes("branchId=branch_b"))).toBe(
+      true,
+    );
+  });
+
+  test("keeps parallel attention category completions atomically", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    const first = deferred<{ data: ReturnType<typeof gym> }>();
+    const second = deferred<{ data: ReturnType<typeof gym> }>();
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      if (!String(path).includes("attentionCategory="))
+        return Promise.resolve({
+          data: gym(false, null, {
+            CHECKIN_OVERDUE: attentionPage(
+              "relationship_a",
+              "cursor-a",
+              "CHECKIN_OVERDUE",
+            ),
+            NO_ACTIVE_PROGRAM: attentionPage("relationship_b", "cursor-b"),
+          }),
+        });
+      return String(path).includes("CHECKIN_OVERDUE")
+        ? first.promise
+        : second.promise;
+    });
+
+    renderExperience();
+    await screen.findByRole("heading", { name: "Gym dashboard" });
+    const buttons = screen.getAllByRole("button", { name: "Load more" });
+    fireEvent.click(buttons[0]!);
+    fireEvent.click(buttons[1]!);
+    expect(screen.getByText("Loading more analytics...")).toHaveAttribute(
+      "role",
+      "status",
+    );
+    await waitFor(() =>
+      expect(mocks.auth.apiClient.request).toHaveBeenCalledTimes(3),
+    );
+    const continuationPaths = mocks.auth.apiClient.request.mock.calls
+      .map(([call]) => String(call.path))
+      .filter((path) => path.includes("attentionCursor="));
+    expect(continuationPaths).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "attentionCategory=CHECKIN_OVERDUE&attentionCursor=cursor-a",
+        ),
+        expect.stringContaining(
+          "attentionCategory=NO_ACTIVE_PROGRAM&attentionCursor=cursor-b",
+        ),
+      ]),
+    );
+    await act(async () => {
+      first.resolve({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "relationship_a2",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+      await first.promise;
+    });
+    await act(async () => {
+      second.resolve({
+        data: gym(false, null, {
+          NO_ACTIVE_PROGRAM: attentionPage("relationship_b2", null),
+        }),
+      });
+      await second.promise;
+    });
+    expect(screen.getByText(/relationship_a2/)).toBeInTheDocument();
+    expect(screen.getByText(/relationship_b2/)).toBeInTheDocument();
+  });
+
+  test("makes WORKSPACE_INACTIVE a whole-page unavailable state", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    mocks.auth.apiClient.request.mockRejectedValue(
+      new ApiError({
+        code: "WORKSPACE_INACTIVE",
+        kind: "backend",
+        message: "inactive",
+        status: 409,
+      }),
+    );
+    renderExperience();
+    expect(
+      await screen.findByRole("heading", {
+        name: messages.en.analyticsExperience.workspaceInactive,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Gym dashboard" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("loads and renders Backend-authorized relationship sections", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "dashboard.relationship.read",
+      "analytics.training.read",
+      "analytics.nutrition.read",
+      "analytics.adherence.read",
+    ]);
+    expect(isRelationshipDashboardDto(relationshipDashboard())).toBe(true);
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.endsWith("/dashboard"))
+        return Promise.resolve({ data: relationshipDashboard() });
+      if (value.includes("/analytics/training"))
+        return Promise.resolve({ data: trainingAnalytics() });
+      if (value.includes("/analytics/nutrition"))
+        return Promise.resolve({ data: nutritionAnalytics() });
+      if (value.includes("/analytics/adherence"))
+        return Promise.resolve({ data: adherenceAnalytics() });
+      throw new Error(`unexpected request ${value}`);
+    });
+    renderExperience();
+    await screen.findByRole("option", { name: "relationship_a · Active" });
+    fireEvent.change(
+      screen.getByLabelText(messages.en.analyticsExperience.relationship),
+      { target: { value: "relationship_a" } },
+    );
+    await waitFor(() =>
+      expect(
+        mocks.auth.apiClient.request.mock.calls.some(([call]) =>
+          String(call.path).endsWith("/dashboard"),
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Relationship dashboard" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { name: "Training analytics" }),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getAllByRole("heading", { name: "Check-ins" }),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getByText(/PRIMARY_TRAINER|Primary trainer/),
+    ).toBeInTheDocument();
+  });
+
+  test("does not render relationship sections hidden by Backend visibility", async () => {
+    mocks.staff = context(["trainees.read", "dashboard.relationship.read"]);
+    mocks.auth.apiClient.request.mockImplementation(({ path }) =>
+      String(path).endsWith("/relationships")
+        ? Promise.resolve(relationshipsEnvelope())
+        : Promise.resolve({
+            data: {
+              ...relationshipDashboard(),
+              nutrition: nutritionAnalytics(),
+            },
+          }),
+    );
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("heading", { name: "Relationship dashboard" });
+    expect(
+      screen.queryByRole("heading", { name: "Nutrition analytics" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Training analytics" }),
+    ).toBeInTheDocument();
+  });
+
+  test("QA-019 loads more than 500 progress points through the experience seam", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "metric_definitions.read",
+      "analytics.progress.read",
+    ]);
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.includes("/metric-definitions"))
+        return Promise.resolve(metricsEnvelope([metric("metric_a")]));
+      if (value.includes("/analytics/progress")) {
+        const cursorMatch = /cursor=([^&]+)/.exec(value);
+        const pageIndex = cursorMatch
+          ? Number(cursorMatch[1]!.replace("opaque-page-", ""))
+          : 0;
+        const start = pageIndex * 100;
+        const count = pageIndex === 5 ? 1 : 100;
+        return Promise.resolve({
+          data: progressAnalytics(
+            "metric_a",
+            progressPoints(start, count, "metric_a"),
+            pageIndex < 5 ? `opaque-page-${pageIndex + 1}` : null,
+          ),
+        });
+      }
+      throw new Error(`unexpected request ${value}`);
+    });
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("option", { name: "Weight" });
+    fireEvent.change(screen.getByLabelText("Progress metric"), {
+      target: { value: "metric_a" },
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Progress analytics" }),
+    ).toBeInTheDocument();
+
+    for (let pageIndex = 1; pageIndex <= 5; pageIndex += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+      await waitFor(() =>
+        expect(
+          mocks.auth.apiClient.request.mock.calls.filter(([call]) =>
+            String(call.path).includes("/analytics/progress"),
+          ),
+        ).toHaveLength(pageIndex + 1),
+      );
+    }
+    const table = screen.getByRole("region", {
+      name: "Progress analytics: Time series",
+    });
+    await waitFor(() =>
+      expect(table.querySelectorAll("tbody tr")).toHaveLength(501),
+    );
+    const rowHeaders = within(table).getAllByRole("rowheader");
+    expect(rowHeaders[0]).toHaveTextContent("2026-01-01T00:00:00.000Z");
+    expect(rowHeaders.at(-1)).toHaveTextContent("2026-01-01T08:20:00.000Z");
+    const progressPaths = mocks.auth.apiClient.request.mock.calls
+      .map(([call]) => String(call.path))
+      .filter((path) => path.includes("/analytics/progress"));
+    expect(
+      progressPaths.slice(1).every((path) => /cursor=opaque-page-/.test(path)),
+    ).toBe(true);
+  });
+
+  test("QA-020 isolates activity category cursor recovery", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({
+        data: gym(
+          true,
+          null,
+          {},
+          {
+            WORKOUT_COMPLETED: activityPage("workout-base", "activity-a"),
+            PR_ACHIEVED: activityPage("pr-sibling", null),
+          },
+        ),
+      })
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "ACTIVITY_CURSOR_INVALID",
+          kind: "backend",
+          message: "invalid cursor",
+          status: 422,
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: gym(
+          true,
+          null,
+          {},
+          {
+            WORKOUT_COMPLETED: activityPage("workout-reset", null),
+          },
+        ),
+      });
+    renderExperience();
+    await screen.findByText(/workout-base/);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText(/workout-reset/);
+    expect(screen.getByText(/pr-sibling/)).toBeInTheDocument();
+    const paths = mocks.auth.apiClient.request.mock.calls.map(([call]) =>
+      String(call.path),
+    );
+    expect(paths[1]).toContain("activityCategory=WORKOUT_COMPLETED");
+    expect(paths[1]).toContain("activityCursor=activity-a");
+    expect(paths[2]).toContain("activityCategory=WORKOUT_COMPLETED");
+    expect(paths[2]).not.toContain("activityCursor=");
+    expect(paths.join("|")).not.toContain("activityCategory=PR_ACHIEVED");
+  });
+
+  test("keeps parallel activity category completions atomically", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    const workout = deferred<{ data: ReturnType<typeof gym> }>();
+    const pr = deferred<{ data: ReturnType<typeof gym> }>();
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (!value.includes("activityCategory="))
+        return Promise.resolve({
+          data: gym(
+            true,
+            null,
+            {},
+            {
+              WORKOUT_COMPLETED: activityPage("workout-base", "activity-a"),
+              PR_ACHIEVED: activityPage("pr-base", "activity-b"),
+            },
+          ),
+        });
+      return value.includes("WORKOUT_COMPLETED") ? workout.promise : pr.promise;
+    });
+    renderExperience();
+    await screen.findByText(/workout-base/);
+    const buttons = screen.getAllByRole("button", { name: "Load more" });
+    fireEvent.click(buttons[0]!);
+    fireEvent.click(buttons[1]!);
+    await act(async () => {
+      workout.resolve({
+        data: gym(
+          true,
+          null,
+          {},
+          {
+            WORKOUT_COMPLETED: activityPage("workout-next", null),
+          },
+        ),
+      });
+      await workout.promise;
+    });
+    await act(async () => {
+      pr.resolve({
+        data: gym(
+          true,
+          null,
+          {},
+          {
+            PR_ACHIEVED: activityPage("pr-next", null),
+          },
+        ),
+      });
+      await pr.promise;
+    });
+    expect(screen.getByText(/workout-next/)).toBeInTheDocument();
+    expect(screen.getByText(/pr-next/)).toBeInTheDocument();
+    const paths = mocks.auth.apiClient.request.mock.calls.map(([call]) =>
+      String(call.path),
+    );
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "activityCategory=WORKOUT_COMPLETED&activityCursor=activity-a",
+        ),
+        expect.stringContaining(
+          "activityCategory=PR_ACHIEVED&activityCursor=activity-b",
+        ),
+      ]),
+    );
+  });
+
+  test("discards a stale progress response after switching metrics", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "metric_definitions.read",
+      "analytics.progress.read",
+    ]);
+    const metricAResponse = deferred<{
+      data: ReturnType<typeof progressAnalytics>;
+    }>();
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.includes("/metric-definitions"))
+        return Promise.resolve(
+          metricsEnvelope([metric("metric_a"), metric("metric_b")]),
+        );
+      if (value.includes("metricDefinitionId=metric_a"))
+        return metricAResponse.promise;
+      if (value.includes("metricDefinitionId=metric_b"))
+        return Promise.resolve({
+          data: progressAnalytics(
+            "metric_b",
+            [
+              {
+                ...progressPoints(0, 1, "metric_b")[0]!,
+                metricKey: "body-fat",
+                metricName: "Body fat",
+                unit: "%",
+                value: 22,
+              },
+            ],
+            null,
+          ),
+        });
+      throw new Error(`unexpected request ${value}`);
+    });
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("option", { name: "Weight" });
+    fireEvent.change(screen.getByLabelText("Progress metric"), {
+      target: { value: "metric_a" },
+    });
+    await waitFor(() => expect(lastProgressPath()).toContain("metric_a"));
+    fireEvent.change(screen.getByLabelText("Progress metric"), {
+      target: { value: "metric_b" },
+    });
+    expect(await screen.findByText(/Value: 22/)).toBeInTheDocument();
+    await act(async () => {
+      metricAResponse.resolve({
+        data: progressAnalytics(
+          "metric_a",
+          progressPoints(0, 1, "metric_a"),
+          null,
+        ),
+      });
+      await metricAResponse.promise;
+    });
+    expect(screen.getByText(/Value: 22/)).toBeInTheDocument();
+    expect(screen.queryByText(/Value: 0 · Unit: kg/)).not.toBeInTheDocument();
+  });
+
+  test("explicit refresh retires an older dashboard continuation", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    const oldContinuation = deferred<{ data: ReturnType<typeof gym> }>();
+    let calls = 0;
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      calls += 1;
+      if (String(path).includes("attentionCursor="))
+        return oldContinuation.promise;
+      return Promise.resolve({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            calls === 1 ? "base-before-refresh" : "fresh-after-refresh",
+            calls === 1 ? "old-cursor" : null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+    });
+    renderExperience();
+    await screen.findByText(/base-before-refresh/);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText(/fresh-after-refresh/);
+    await act(async () => {
+      oldContinuation.resolve({
+        data: gym(false, null, {
+          CHECKIN_OVERDUE: attentionPage(
+            "stale-after-refresh",
+            null,
+            "CHECKIN_OVERDUE",
+          ),
+        }),
+      });
+      await oldContinuation.promise;
+    });
+    expect(screen.queryByText(/stale-after-refresh/)).not.toBeInTheDocument();
+    expect(screen.getByText(/fresh-after-refresh/)).toBeInTheDocument();
+  });
+
+  test("explicit refresh retires an older progress continuation", async () => {
+    mocks.staff = context([
+      "trainees.read",
+      "metric_definitions.read",
+      "analytics.progress.read",
+    ]);
+    const oldContinuation = deferred<{
+      data: ReturnType<typeof progressAnalytics>;
+    }>();
+    let baseRequests = 0;
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      if (value.includes("/metric-definitions"))
+        return Promise.resolve(metricsEnvelope([metric("metric_a")]));
+      if (value.includes("cursor=progress-old")) return oldContinuation.promise;
+      if (value.includes("/analytics/progress")) {
+        baseRequests += 1;
+        return Promise.resolve({
+          data: progressAnalytics(
+            "metric_a",
+            [
+              {
+                ...progressPoints(0, 1, "metric_a")[0]!,
+                value: baseRequests === 1 ? 10 : 999,
+              },
+            ],
+            baseRequests === 1 ? "progress-old" : null,
+          ),
+        });
+      }
+      throw new Error(`unexpected request ${value}`);
+    });
+    renderExperience();
+    await selectRelationship();
+    await screen.findByRole("option", { name: "Weight" });
+    fireEvent.change(screen.getByLabelText("Progress metric"), {
+      target: { value: "metric_a" },
+    });
+    await screen.findByText(/Value: 10/);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText(/Value: 999/);
+    await act(async () => {
+      oldContinuation.resolve({
+        data: progressAnalytics(
+          "metric_a",
+          [
+            {
+              ...progressPoints(1, 1, "metric_a")[0]!,
+              value: 111,
+            },
+          ],
+          null,
+        ),
+      });
+      await oldContinuation.promise;
+    });
+    expect(screen.queryByText(/Value: 111/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Value: 999/)).toBeInTheDocument();
+  });
+
+  test("surfaces targeted errors without converting 403 into logout", async () => {
+    mocks.staff = context(["trainees.read", "analytics.training.read"]);
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      return Promise.reject(
+        new ApiError({
+          code: "PERMISSION_DENIED",
+          kind: "backend",
+          message: "denied",
+          status: 403,
+        }),
+      );
+    });
+    renderExperience();
+    await selectRelationship();
+    expect(
+      await screen.findByRole("alert", {
+        name: "",
+      }),
+    ).toHaveTextContent("Training analytics: You do not have access");
+    expect(mocks.auth.state.status).toBe("authenticated");
+  });
+
+  test("retains valid data and exposes retry after a network refresh failure", async () => {
+    mocks.staff = context(["dashboard.gym.read"]);
+    mocks.auth.apiClient.request
+      .mockResolvedValueOnce({ data: gym(false, null) })
+      .mockRejectedValueOnce(
+        new ApiError({ kind: "network", message: "offline" }),
+      );
+    renderExperience();
+    await screen.findByRole("heading", { name: "Gym dashboard" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(
+      await screen.findByRole("button", { name: "Retry" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Gym dashboard" }),
+    ).toBeInTheDocument();
+  });
+
+  test("QA-027 sends calendar dates and renders authoritative DST ranges", async () => {
+    mocks.staff = context(["trainees.read", "analytics.training.read"]);
+    const longRange = {
+      from: "2026-11-01T04:00:00.000Z",
+      to: "2026-11-02T05:00:00.000Z",
+      timezone: "America/New_York",
+    };
+    mocks.auth.apiClient.request.mockImplementation(({ path }) => {
+      const value = String(path);
+      if (value.endsWith("/relationships"))
+        return Promise.resolve(relationshipsEnvelope());
+      return Promise.resolve({
+        data: {
+          ...trainingAnalytics(),
+          range: value.includes("from=2026-11-01")
+            ? longRange
+            : authoritativeRange,
+        },
+      });
+    });
+    renderExperience();
+    await selectRelationship();
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-03-08" },
+    });
+    fireEvent.change(screen.getByLabelText("To (exclusive)"), {
+      target: { value: "2026-03-09" },
+    });
+    await waitFor(() =>
+      expect(lastTrainingPath()).toContain(
+        "from=2026-03-08&granularity=day&to=2026-03-09",
+      ),
+    );
+    expect(
+      await screen.findByText(
+        /2026-03-08T05:00:00.000Z.*2026-03-09T04:00:00.000Z/,
+      ),
+    ).toHaveTextContent("America/New_York");
+
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-11-01" },
+    });
+    fireEvent.change(screen.getByLabelText("To (exclusive)"), {
+      target: { value: "2026-11-02" },
+    });
+    await waitFor(() =>
+      expect(lastTrainingPath()).toContain(
+        "from=2026-11-01&granularity=day&to=2026-11-02",
+      ),
+    );
+    expect(
+      await screen.findByText(
+        /2026-11-01T04:00:00.000Z.*2026-11-02T05:00:00.000Z/,
+      ),
+    ).toHaveTextContent("America/New_York");
+    expect(screen.getByText(/end date is exclusive/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("To (exclusive)"), {
+      target: { value: "2027-01-01" },
+    });
+    await waitFor(() =>
+      expect(lastTrainingPath()).toContain(
+        "from=2026-01-01&granularity=day&to=2027-01-01",
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("To (exclusive)"), {
+      target: { value: "2027-01-02" },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      messages.en.analyticsExperience.invalidRange,
+    );
+    expect(
+      mocks.auth.apiClient.request.mock.calls
+        .map(([call]) => String(call.path))
+        .some((path) =>
+          path.includes("from=2026-01-01&granularity=day&to=2027-01-02"),
+        ),
+    ).toBe(false);
+  });
 });
 
 function renderExperience() {
@@ -163,10 +859,33 @@ function renderExperience() {
     </QueryClientProvider>,
   );
 }
+async function selectRelationship() {
+  await screen.findByRole("option", { name: "relationship_a · Active" });
+  fireEvent.change(screen.getByLabelText("Trainee relationship"), {
+    target: { value: "relationship_a" },
+  });
+}
+function lastTrainingPath() {
+  return String(
+    mocks.auth.apiClient.request.mock.calls
+      .map(([call]) => call)
+      .filter((call) => String(call.path).includes("/analytics/training"))
+      .at(-1)?.path ?? "",
+  );
+}
+function lastProgressPath() {
+  return String(
+    mocks.auth.apiClient.request.mock.calls
+      .map(([call]) => call)
+      .filter((call) => String(call.path).includes("/analytics/progress"))
+      .at(-1)?.path ?? "",
+  );
+}
 function context(
   allowed: readonly PermissionKey[],
   accessContext: "support" | "user" = "user",
   status: "ready" | "unresolved" = "ready",
+  branchId: string | null = null,
 ): StaffWorkspaceContextValue {
   const decisions = analyticsRouteAPermissions.map((permission) => ({
     allowed: allowed.includes(permission),
@@ -197,7 +916,7 @@ function context(
     },
     shellContext: {
       accessContext,
-      branch: { branchId: null, label: "All" },
+      branch: { branchId: branchId as never, label: branchId ?? "All" },
       portal: "gym-staff",
       sessionGeneration: 1,
       workspace,
@@ -205,7 +924,12 @@ function context(
     workspace,
   };
 }
-function gym(pureWorkspaceWide: boolean, nextCursor: string | null) {
+function gym(
+  pureWorkspaceWide: boolean,
+  nextCursor: string | null,
+  needsAttention: Record<string, ReturnType<typeof attentionPage>> = {},
+  recentActivity?: Record<string, ReturnType<typeof activityPage>> | null,
+) {
   const category = {
     count: null,
     hasMore: nextCursor !== null,
@@ -236,9 +960,242 @@ function gym(pureWorkspaceWide: boolean, nextCursor: string | null) {
       includeRelationshipIds: [],
       excludeRelationshipIds: [],
     },
-    summary: { activeTrainees: 1 },
+    summary: {
+      activeTrainees: 1,
+      needsReassignment: 0,
+      activeStaff: 1,
+      completedWorkouts: 1,
+      overdueCheckIns: 0,
+      pendingReviewCheckIns: 0,
+    },
     branchBreakdown: { items: [], hasMore: false, nextCursor: null },
-    needsAttention: {},
-    recentActivity: { WORKOUT_COMPLETED: category },
+    needsAttention,
+    recentActivity:
+      recentActivity === undefined
+        ? { WORKOUT_COMPLETED: category }
+        : recentActivity,
   };
+}
+
+function attentionPage(
+  relationshipId: string,
+  nextCursor: string | null,
+  category = "NO_ACTIVE_PROGRAM",
+) {
+  return {
+    count: null,
+    hasMore: nextCursor !== null,
+    items: [
+      category === "CHECKIN_OVERDUE"
+        ? {
+            relationshipId,
+            checkInId: `checkin-${relationshipId}`,
+            dueAt: "2026-03-09T03:00:00.000Z",
+            severity: "high" as const,
+          }
+        : { relationshipId, severity: "medium" as const },
+    ],
+    nextCursor,
+  };
+}
+
+function activityPage(summary: string, nextCursor: string | null) {
+  return {
+    count: null,
+    hasMore: nextCursor !== null,
+    items: [
+      {
+        relationshipId: "relationship_a",
+        traineeDisplay: null,
+        occurredAt: "2026-03-09T03:00:00.000Z",
+        summary,
+      },
+    ],
+    nextCursor,
+  };
+}
+
+function relationshipsEnvelope() {
+  return {
+    data: {
+      data: [
+        {
+          id: "relationship_a",
+          workspaceId: "workspace_a",
+          traineeUserId: "trainee_a",
+          status: "ACTIVE",
+          engagementPeriods: [],
+          version: 1,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      meta: { hasMore: false, nextCursor: null },
+    },
+  };
+}
+
+function metric(id: string) {
+  return {
+    id,
+    scope: "SYSTEM",
+    name: id === "metric_a" ? "Weight" : "Body fat",
+    valueType: "NUMBER",
+    unit: id === "metric_a" ? "kg" : "%",
+    category: "BODY",
+    status: "ACTIVE",
+    version: 1,
+  };
+}
+
+function metricsEnvelope(items: ReturnType<typeof metric>[]) {
+  return { data: items, nextCursor: undefined };
+}
+
+function progressPoints(
+  start: number,
+  count: number,
+  metricDefinitionId: string,
+) {
+  const base = Date.parse("2026-01-01T00:00:00.000Z");
+  return Array.from({ length: count }, (_, offset) => {
+    const index = start + offset;
+    return {
+      id: `point-${index}`,
+      value: index,
+      unit: "kg",
+      metricDefinitionId,
+      metricKey: "weight",
+      metricName: "Weight",
+      measuredAt: new Date(base + index * 60_000).toISOString(),
+    };
+  });
+}
+
+function progressAnalytics(
+  metricDefinitionId: string,
+  points: ReturnType<typeof progressPoints>,
+  nextCursor: string | null,
+) {
+  return {
+    workspaceId: "workspace_a",
+    relationshipId: "relationship_a",
+    range: authoritativeRange,
+    metricDefinitionId,
+    summary: {
+      firstInWindow: points[0] ?? null,
+      latestInWindow: points.at(-1) ?? null,
+      latest: points.at(-1) ?? null,
+      delta: null,
+      percentChange: null,
+    },
+    points,
+    page: { hasMore: nextCursor !== null, nextCursor },
+    buckets: [],
+    photoSummary: { count: 0 },
+  };
+}
+
+const authoritativeRange = {
+  from: "2026-03-08T05:00:00.000Z",
+  to: "2026-03-09T04:00:00.000Z",
+  timezone: "America/New_York",
+};
+
+function trainingAnalytics() {
+  return {
+    workspaceId: "workspace_a",
+    relationshipId: "relationship_a",
+    range: authoritativeRange,
+    granularity: "day",
+    summary: {
+      startedSessions: 1,
+      completedSessions: 1,
+      abandonedSessions: 0,
+      programDaysCompleted: 1,
+      programDaysSkipped: 0,
+      programDaysDeferred: 0,
+      workoutAdherenceRate: 1,
+      prCount: 0,
+    },
+    series: [],
+    latestPr: null,
+  };
+}
+
+function nutritionAnalytics() {
+  return {
+    workspaceId: "workspace_a",
+    relationshipId: "relationship_a",
+    range: authoritativeRange,
+    activePlan: null,
+    targets: null,
+    nutritionTracking: { daysTracked: 0, averageAdherenceRate: null },
+    waterTracking: { daysTracked: 0, averageMl: null, targetMl: null },
+    series: [],
+  };
+}
+
+function adherenceAnalytics() {
+  return {
+    workspaceId: "workspace_a",
+    relationshipId: "relationship_a",
+    range: authoritativeRange,
+    granularity: "day",
+    training: trainingAnalytics().summary,
+    checkIns: {
+      dueCount: 1,
+      submittedOrReviewedCount: 1,
+      complianceRate: 1,
+    },
+    nutrition: null,
+    water: null,
+    series: [],
+  };
+}
+
+function relationshipDashboard() {
+  return {
+    workspaceId: "workspace_a",
+    relationshipId: "relationship_a",
+    generatedAt: "2026-03-09T04:00:00.000Z",
+    relationship: { status: "ACTIVE", homeBranchId: null },
+    assignedStaff: [
+      {
+        assignmentType: "PRIMARY_TRAINER",
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    training: trainingAnalytics(),
+    nutrition: null,
+    progress: null,
+    checkIns: {
+      dueCount: 1,
+      submittedOrReviewedCount: 1,
+      complianceRate: 1,
+    },
+    adherence: adherenceAnalytics(),
+    needsAttention: {
+      NO_ACTIVE_PROGRAM: attentionPage("relationship_a", null),
+    },
+    access: {
+      actorKind: "TRAINER",
+      sections: {
+        training: true,
+        nutrition: false,
+        progress: true,
+        checkIns: true,
+      },
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }

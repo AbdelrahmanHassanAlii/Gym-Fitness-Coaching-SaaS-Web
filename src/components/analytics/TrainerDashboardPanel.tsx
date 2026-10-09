@@ -21,7 +21,7 @@ export function TrainerDashboardPanel({
       />
       <AnalyticsSeriesTable
         caption={labels.summary}
-        rows={[data.summary]}
+        rows={[data.summary] as unknown as readonly Record<string, unknown>[]}
         labels={labels}
       />
       <h3>{labels.attention}</h3>

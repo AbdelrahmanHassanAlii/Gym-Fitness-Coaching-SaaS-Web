@@ -73,7 +73,10 @@ export function localDateRangeWithinLimit(
   const start = calendarOrdinal(from);
   const end = calendarOrdinal(to);
   return (
-    start !== null && end !== null && end > start && end - start <= maximumDays
+    start !== null &&
+    end !== null &&
+    end > start &&
+    end - start + 1 <= maximumDays
   );
 }
 

@@ -1,4 +1,14 @@
 import type { RelationshipId, WorkspaceId } from "@/contracts/common/ids";
+import type { NutritionAnalyticsDto } from "@/contracts/nutrition/contracts";
+import { isNutritionAnalyticsDto } from "@/contracts/nutrition/contracts";
+import type {
+  AdherenceAnalyticsDto,
+  ProgressAnalyticsDto,
+} from "@/contracts/progress/contracts";
+import {
+  isAdherenceAnalyticsDto,
+  isProgressAnalyticsDto,
+} from "@/contracts/progress/contracts";
 import { isOffsetTimestamp } from "@/lib/date-time";
 
 export const analyticsGranularities = ["day", "week"] as const;
@@ -92,7 +102,7 @@ export interface GymDashboardDto {
   generatedAt: string;
   window: AnalyticsRangeDto;
   scope: DashboardScopeDto;
-  summary: Record<string, number>;
+  summary: GymDashboardSummaryDto;
   branchBreakdown: Omit<EmbeddedPageDto<BranchDashboardItemDto>, "count">;
   needsAttention: Partial<
     Record<AttentionCategory, EmbeddedPageDto<AttentionItemDto>>
@@ -106,11 +116,53 @@ export interface TrainerDashboardDto {
   generatedAt: string;
   window: AnalyticsRangeDto;
   scope: DashboardScopeDto;
-  summary: Record<string, number>;
+  summary: TrainerDashboardSummaryDto;
   needsAttention: Partial<
     Record<AttentionCategory, EmbeddedPageDto<AttentionItemDto>>
   >;
   recentActivity: null;
+}
+export interface GymDashboardSummaryDto {
+  activeTrainees: number;
+  needsReassignment: number;
+  activeStaff: number;
+  completedWorkouts: number;
+  overdueCheckIns: number;
+  pendingReviewCheckIns: number;
+}
+export interface TrainerDashboardSummaryDto {
+  assignedActiveTrainees: number;
+  newlyAssignedTrainees: number;
+  completedWorkouts: number;
+  overdueCheckIns: number;
+  pendingReviewCheckIns: number;
+}
+export interface TrainingSummaryDto {
+  startedSessions: number;
+  completedSessions: number;
+  abandonedSessions: number;
+  programDaysCompleted: number;
+  programDaysSkipped: number;
+  programDaysDeferred: number;
+  workoutAdherenceRate: number | null;
+  prCount: number;
+}
+export interface TrainingSeriesDto {
+  key: string;
+  from: string;
+  to: string;
+  startedSessions: number;
+  completedSessions: number;
+  abandonedSessions: number;
+  programDaysCompleted: number;
+  programDaysSkipped: number;
+  programDaysDeferred: number;
+  workoutAdherenceRate: number | null;
+}
+export interface CheckInSummaryDto {
+  dueCount: number;
+  submittedOrReviewedCount: number;
+  complianceRate: number | null;
 }
 export interface RelationshipDashboardDto {
   workspaceId: WorkspaceId;
@@ -121,17 +173,26 @@ export interface RelationshipDashboardDto {
     traineeUserId?: string;
     homeBranchId: string | null;
   };
-  assignedStaff: readonly { assignmentType: string; startedAt: string }[];
-  training: Record<string, unknown> | null;
-  nutrition: Record<string, unknown> | null;
-  progress: Record<string, unknown> | null;
-  checkIns: Record<string, unknown> | null;
-  adherence: Record<string, unknown> | null;
+  assignedStaff: readonly {
+    assignmentType: "PRIMARY_TRAINER" | "ASSISTANT_TRAINER" | "NUTRITIONIST";
+    startedAt: string;
+  }[];
+  training: TrainingAnalyticsDto | null;
+  nutrition: NutritionAnalyticsDto | null;
+  progress: ProgressAnalyticsDto | null;
+  checkIns: CheckInSummaryDto | null;
+  adherence: AdherenceAnalyticsDto;
   needsAttention: Partial<
     Record<AttentionCategory, EmbeddedPageDto<AttentionItemDto>>
   >;
   access: {
-    actorKind: string;
+    actorKind:
+      | "OWNER"
+      | "MANAGER"
+      | "TRAINER"
+      | "ASSISTANT_TRAINER"
+      | "NUTRITIONIST"
+      | "TRAINEE";
     sections: {
       training: boolean;
       nutrition: boolean;
@@ -145,9 +206,13 @@ export interface TrainingAnalyticsDto {
   relationshipId: RelationshipId;
   range: AnalyticsRangeDto;
   granularity: AnalyticsGranularity;
-  summary: Record<string, number | null>;
-  series: readonly Record<string, unknown>[];
-  latestPr: Record<string, unknown> | null;
+  summary: TrainingSummaryDto;
+  series: readonly TrainingSeriesDto[];
+  latestPr: {
+    occurredAt: string;
+    exerciseId: string | null;
+    value: number | null;
+  } | null;
 }
 
 export function isAnalyticsRangeDto(
@@ -163,6 +228,7 @@ export function isAnalyticsRangeDto(
 export function isGymDashboardDto(value: unknown): value is GymDashboardDto {
   return (
     dashboardBase(value) &&
+    gymSummary(value.summary) &&
     isRecord(value.branchBreakdown) &&
     Array.isArray(value.branchBreakdown.items) &&
     value.branchBreakdown.items.every(branchItem) &&
@@ -176,6 +242,7 @@ export function isTrainerDashboardDto(
 ): value is TrainerDashboardDto {
   return (
     dashboardBase(value) &&
+    trainerSummary(value.summary) &&
     attentionMap(value.needsAttention) &&
     value.recentActivity === null
   );
@@ -199,16 +266,21 @@ export function isRelationshipDashboardDto(
     value.assignedStaff.every(
       (item) =>
         isRecord(item) &&
-        typeof item.assignmentType === "string" &&
+        literal(item.assignmentType, [
+          "PRIMARY_TRAINER",
+          "ASSISTANT_TRAINER",
+          "NUTRITIONIST",
+        ] as const) &&
         offsetTimestamp(item.startedAt),
     ) &&
-    nullableRecord(value.training) &&
-    nullableRecord(value.nutrition) &&
-    nullableRecord(value.progress) &&
-    nullableRecord(value.checkIns) &&
-    nullableRecord(value.adherence) &&
+    (value.training === null || isTrainingAnalyticsDto(value.training)) &&
+    (value.nutrition === null || isNutritionAnalyticsDto(value.nutrition)) &&
+    (value.progress === null || isProgressAnalyticsDto(value.progress)) &&
+    (value.checkIns === null || checkInSummary(value.checkIns)) &&
+    isAdherenceAnalyticsDto(value.adherence) &&
     attentionMap(value.needsAttention) &&
-    accessShape(value.access)
+    accessShape(value.access) &&
+    relationshipNestedIdentitiesMatch(value)
   );
 }
 export function isTrainingAnalyticsDto(
@@ -220,24 +292,24 @@ export function isTrainingAnalyticsDto(
     id(value.relationshipId) &&
     isAnalyticsRangeDto(value.range) &&
     literal(value.granularity, analyticsGranularities) &&
-    numberRecord(value.summary) &&
+    trainingSummary(value.summary) &&
     Array.isArray(value.series) &&
-    value.series.every(seriesBucket) &&
+    value.series.every(trainingSeriesBucket) &&
     (value.latestPr === null ||
-      (isRecord(value.latestPr) && offsetTimestamp(value.latestPr.occurredAt)))
+      (isRecord(value.latestPr) &&
+        offsetTimestamp(value.latestPr.occurredAt) &&
+        (value.latestPr.exerciseId === null || id(value.latestPr.exerciseId)) &&
+        nullableNumber(value.latestPr.value)))
   );
 }
 
-function dashboardBase(
-  value: unknown,
-): value is Record<string, unknown> & GymDashboardDto {
+function dashboardBase(value: unknown): value is Record<string, unknown> {
   return (
     isRecord(value) &&
     id(value.workspaceId) &&
     offsetTimestamp(value.generatedAt) &&
     isAnalyticsRangeDto(value.window) &&
-    scope(value.scope) &&
-    numberRecord(value.summary)
+    scope(value.scope)
   );
 }
 function scope(value: unknown): value is DashboardScopeDto {
@@ -263,7 +335,7 @@ function activityMap(value: unknown) {
 function categoryMap(
   value: unknown,
   categories: readonly string[],
-  guard: (item: unknown) => boolean,
+  guard: (item: unknown, category: string) => boolean,
 ) {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(
@@ -272,7 +344,7 @@ function categoryMap(
       isRecord(itemPage) &&
       (itemPage.count === null || nonNegativeInteger(itemPage.count)) &&
       Array.isArray(itemPage.items) &&
-      itemPage.items.every(guard) &&
+      itemPage.items.every((item) => guard(item, category)) &&
       pageInfo(itemPage),
   );
 }
@@ -290,14 +362,31 @@ function branchItem(value: unknown) {
     ].every(nonNegativeInteger)
   );
 }
-function attentionItem(value: unknown) {
-  return (
+function attentionItem(value: unknown, category: string) {
+  if (!(
     isRecord(value) &&
     id(value.relationshipId) &&
     ["high", "medium", "low"].includes(String(value.severity)) &&
     (value.checkInId === undefined || id(value.checkInId)) &&
     (value.dueAt === undefined || offsetTimestamp(value.dueAt))
-  );
+  ))
+    return false;
+  if (category === "CHECKIN_OVERDUE")
+    return (
+      id(value.checkInId) &&
+      offsetTimestamp(value.dueAt) &&
+      value.severity === "high"
+    );
+  if (category === "CHECKIN_PENDING_REVIEW")
+    return (
+      id(value.checkInId) &&
+      offsetTimestamp(value.dueAt) &&
+      value.severity === "medium"
+    );
+  if (value.checkInId !== undefined || value.dueAt !== undefined) return false;
+  if (category === "NEEDS_REASSIGNMENT") return value.severity === "high";
+  if (category === "NO_ACTIVE_NUTRITION_PLAN") return value.severity === "low";
+  return value.severity === "medium";
 }
 function activityItem(value: unknown) {
   return (
@@ -315,37 +404,99 @@ function pageInfo(value: Record<string, unknown>) {
     (value.nextCursor === null || typeof value.nextCursor === "string")
   );
 }
-function seriesBucket(value: unknown) {
+function trainingSeriesBucket(value: unknown) {
   return (
     isRecord(value) &&
     typeof value.key === "string" &&
     offsetTimestamp(value.from) &&
-    offsetTimestamp(value.to)
+    offsetTimestamp(value.to) &&
+    trainingCounts(value) &&
+    nullableNumber(value.workoutAdherenceRate)
   );
 }
-function numberRecord(value: unknown): value is Record<string, number> {
+function trainingSummary(value: unknown): value is TrainingSummaryDto {
   return (
     isRecord(value) &&
-    Object.values(value).every(
-      (item) => item === null || typeof item === "number",
-    )
+    trainingCounts(value) &&
+    nonNegativeInteger(value.prCount) &&
+    nullableNumber(value.workoutAdherenceRate)
   );
 }
-function nullableRecord(
-  value: unknown,
-): value is Record<string, unknown> | null {
-  return value === null || isRecord(value);
+function trainingCounts(value: Record<string, unknown>) {
+  return [
+    value.startedSessions,
+    value.completedSessions,
+    value.abandonedSessions,
+    value.programDaysCompleted,
+    value.programDaysSkipped,
+    value.programDaysDeferred,
+  ].every(nonNegativeInteger);
+}
+function gymSummary(value: unknown): value is GymDashboardSummaryDto {
+  return (
+    isRecord(value) &&
+    [
+      value.activeTrainees,
+      value.needsReassignment,
+      value.activeStaff,
+      value.completedWorkouts,
+      value.overdueCheckIns,
+      value.pendingReviewCheckIns,
+    ].every(nonNegativeInteger)
+  );
+}
+function trainerSummary(value: unknown): value is TrainerDashboardSummaryDto {
+  return (
+    isRecord(value) &&
+    [
+      value.assignedActiveTrainees,
+      value.newlyAssignedTrainees,
+      value.completedWorkouts,
+      value.overdueCheckIns,
+      value.pendingReviewCheckIns,
+    ].every(nonNegativeInteger)
+  );
+}
+function checkInSummary(value: unknown): value is CheckInSummaryDto {
+  return (
+    isRecord(value) &&
+    nonNegativeInteger(value.dueCount) &&
+    nonNegativeInteger(value.submittedOrReviewedCount) &&
+    nullableNumber(value.complianceRate)
+  );
 }
 function accessShape(value: unknown) {
   if (
     !isRecord(value) ||
-    typeof value.actorKind !== "string" ||
+    !literal(value.actorKind, [
+      "OWNER",
+      "MANAGER",
+      "TRAINER",
+      "ASSISTANT_TRAINER",
+      "NUTRITIONIST",
+      "TRAINEE",
+    ] as const) ||
     !isRecord(value.sections)
   )
     return false;
   const sections = value.sections;
   return ["training", "nutrition", "progress", "checkIns"].every(
     (key) => typeof sections[key] === "boolean",
+  );
+}
+function relationshipNestedIdentitiesMatch(value: Record<string, unknown>) {
+  const nested = [
+    value.training,
+    value.nutrition,
+    value.progress,
+    value.adherence,
+  ];
+  return nested.every(
+    (section) =>
+      section === null ||
+      (isRecord(section) &&
+        section.workspaceId === value.workspaceId &&
+        section.relationshipId === value.relationshipId),
   );
 }
 function stringArray(value: unknown) {
@@ -358,6 +509,11 @@ function id(value: unknown): value is string {
 }
 function nonNegativeInteger(value: unknown) {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+function nullableNumber(value: unknown): value is number | null {
+  return (
+    value === null || (typeof value === "number" && Number.isFinite(value))
+  );
 }
 function literal<T extends readonly string[]>(
   value: unknown,

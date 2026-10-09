@@ -217,11 +217,49 @@ export interface AdherenceAnalyticsDto {
   relationshipId: RelationshipId;
   range: { from: string; to: string; timezone: string };
   granularity: AdherenceAnalyticsGranularity;
-  training: Record<string, unknown> | null;
-  checkIns: Record<string, unknown> | null;
-  nutrition: Record<string, unknown> | null;
-  water: Record<string, unknown> | null;
-  series: readonly Record<string, unknown>[];
+  training: AdherenceTrainingSummaryDto | null;
+  checkIns: AdherenceCheckInSummaryDto | null;
+  nutrition: AdherenceNutritionSummaryDto | null;
+  water: AdherenceWaterSummaryDto | null;
+  series: readonly AdherenceSeriesDto[];
+}
+
+export interface AdherenceTrainingSummaryDto {
+  startedSessions: number;
+  completedSessions: number;
+  abandonedSessions: number;
+  programDaysCompleted: number;
+  programDaysSkipped: number;
+  programDaysDeferred: number;
+  workoutAdherenceRate: number | null;
+  prCount: number;
+}
+
+export interface AdherenceCheckInSummaryDto {
+  dueCount: number;
+  submittedOrReviewedCount: number;
+  complianceRate: number | null;
+}
+
+export interface AdherenceNutritionSummaryDto {
+  daysTracked: number;
+  averageAdherenceRate: number | null;
+}
+
+export interface AdherenceWaterSummaryDto {
+  daysTracked: number;
+  averageMl: number | null;
+  targetMl: number | null;
+}
+
+export interface AdherenceSeriesDto {
+  key: string;
+  from: string;
+  to: string;
+  training?: { workoutAdherenceRate: number | null };
+  checkIns?: { complianceRate: number | null };
+  nutrition?: { adherenceRate: number | null };
+  water?: { adherenceRate: number | null };
 }
 
 export const isMetricDefinitionDto = (
@@ -314,7 +352,7 @@ export const isProgressAnalyticsDto = (
   isRecord(value.range) &&
   timestamp(value.range.from) &&
   timestamp(value.range.to) &&
-  typeof value.range.timezone === "string" &&
+  validTimezone(value.range.timezone) &&
   id(value.metricDefinitionId) &&
   isRecord(value.summary) &&
   (value.summary.firstInWindow === null ||
@@ -334,7 +372,8 @@ export const isProgressAnalyticsDto = (
   Array.isArray(value.buckets) &&
   value.buckets.every(isProgressAnalyticsBucketDto) &&
   isRecord(value.photoSummary) &&
-  version(value.photoSummary.count);
+  version(value.photoSummary.count) &&
+  progressMetricIdentitiesMatch(value);
 
 export const isAdherenceAnalyticsDto = (
   value: unknown,
@@ -345,13 +384,76 @@ export const isAdherenceAnalyticsDto = (
   isRecord(value.range) &&
   timestamp(value.range.from) &&
   timestamp(value.range.to) &&
-  typeof value.range.timezone === "string" &&
+  validTimezone(value.range.timezone) &&
   literal(value.granularity, adherenceAnalyticsGranularities) &&
-  (value.training === null || isRecord(value.training)) &&
-  (value.checkIns === null || isRecord(value.checkIns)) &&
-  (value.nutrition === null || isRecord(value.nutrition)) &&
-  (value.water === null || isRecord(value.water)) &&
-  Array.isArray(value.series);
+  (value.training === null || isAdherenceTrainingSummary(value.training)) &&
+  (value.checkIns === null || isAdherenceCheckInSummary(value.checkIns)) &&
+  (value.nutrition === null || isAdherenceNutritionSummary(value.nutrition)) &&
+  (value.water === null || isAdherenceWaterSummary(value.water)) &&
+  Array.isArray(value.series) &&
+  value.series.every(isAdherenceSeries);
+
+function isAdherenceTrainingSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    [
+      value.startedSessions,
+      value.completedSessions,
+      value.abandonedSessions,
+      value.programDaysCompleted,
+      value.programDaysSkipped,
+      value.programDaysDeferred,
+      value.prCount,
+    ].every(nonNegativeInteger) &&
+    nullableNumber(value.workoutAdherenceRate)
+  );
+}
+
+function isAdherenceCheckInSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    nonNegativeInteger(value.dueCount) &&
+    nonNegativeInteger(value.submittedOrReviewedCount) &&
+    nullableNumber(value.complianceRate)
+  );
+}
+
+function isAdherenceNutritionSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    nonNegativeInteger(value.daysTracked) &&
+    nullableNumber(value.averageAdherenceRate)
+  );
+}
+
+function isAdherenceWaterSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    nonNegativeInteger(value.daysTracked) &&
+    nullableNumber(value.averageMl) &&
+    nullableNumber(value.targetMl)
+  );
+}
+
+function isAdherenceSeries(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    timestamp(value.from) &&
+    timestamp(value.to) &&
+    optionalRateComponent(value.training, "workoutAdherenceRate") &&
+    optionalRateComponent(value.checkIns, "complianceRate") &&
+    optionalRateComponent(value.nutrition, "adherenceRate") &&
+    optionalRateComponent(value.water, "adherenceRate") &&
+    [value.training, value.checkIns, value.nutrition, value.water].some(
+      (component) => component !== undefined,
+    )
+  );
+}
+
+function optionalRateComponent(value: unknown, key: string) {
+  return value === undefined || (isRecord(value) && nullableNumber(value[key]));
+}
 
 function isProgressAnalyticsPointDto(
   value: unknown,
@@ -380,8 +482,29 @@ function isProgressAnalyticsBucketDto(
   );
 }
 
+function progressMetricIdentitiesMatch(
+  value: Record<string, unknown>,
+): boolean {
+  const metricDefinitionId = value.metricDefinitionId;
+  if (typeof metricDefinitionId !== "string" || !isRecord(value.summary))
+    return false;
+  const summaryPoints = [
+    value.summary.firstInWindow,
+    value.summary.latestInWindow,
+    value.summary.latest,
+  ].filter((point) => point !== null);
+  const points = Array.isArray(value.points) ? value.points : [];
+  const bucketPoints = Array.isArray(value.buckets)
+    ? value.buckets.filter(isRecord).map((bucket) => bucket.latest)
+    : [];
+  return [...summaryPoints, ...points, ...bucketPoints].every(
+    (point) =>
+      isRecord(point) && point.metricDefinitionId === metricDefinitionId,
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function literal<T extends readonly string[]>(
@@ -419,6 +542,10 @@ function version(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+function nonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
 function stringArray(value: unknown): value is readonly string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")
@@ -433,6 +560,16 @@ function optionalStringArray(
 
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && isOffsetTimestamp(value);
+}
+
+function validTimezone(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function localDate(value: unknown): value is string {

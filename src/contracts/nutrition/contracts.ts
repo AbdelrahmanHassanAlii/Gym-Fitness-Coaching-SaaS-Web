@@ -364,7 +364,7 @@ export const isNutritionAnalyticsDto = (
   isRecord(value.range) &&
   timestamp(value.range.from) &&
   timestamp(value.range.to) &&
-  typeof value.range.timezone === "string" &&
+  validTimezone(value.range.timezone) &&
   (value.activePlan === null ||
     (isRecord(value.activePlan) &&
       idField(value.activePlan.id) &&
@@ -569,6 +569,16 @@ function localDate(value: unknown): value is string {
 
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && isOffsetTimestamp(value);
+}
+
+function validTimezone(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function optionalTimestamp(value: unknown): value is string | undefined {

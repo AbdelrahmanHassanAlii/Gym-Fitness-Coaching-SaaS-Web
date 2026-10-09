@@ -127,6 +127,8 @@ function AnalyticsContent({
     data: Awaited<ReturnType<typeof listAnalyticsMetrics>>;
   } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [workspaceUnavailable, setWorkspaceUnavailable] = useState(false);
+  const [pendingPageCount, setPendingPageCount] = useState(0);
   const mounted = useRef(true);
   const paginationGeneration = useRef(0);
   const pendingPages = useRef(new Set<string>());
@@ -213,7 +215,10 @@ function AnalyticsContent({
 
   const relationshipsQuery = useQuery({
     enabled: Boolean(
-      identity && hasDataPermission && decisions["trainees.read"],
+      !workspaceUnavailable &&
+      identity &&
+      hasDataPermission &&
+      decisions["trainees.read"],
     ),
     queryFn: ({ signal }) =>
       listAnalyticsRelationships(apiClient, identity!.workspaceId, signal),
@@ -224,6 +229,7 @@ function AnalyticsContent({
   });
   const metricsQuery = useQuery({
     enabled: Boolean(
+      !workspaceUnavailable &&
       identity &&
       hasDataPermission &&
       decisions["analytics.progress.read"] &&
@@ -255,7 +261,10 @@ function AnalyticsContent({
 
   const gymQuery = useQuery({
     enabled: Boolean(
-      identity && hasDataPermission && decisions["dashboard.gym.read"],
+      !workspaceUnavailable &&
+      identity &&
+      hasDataPermission &&
+      decisions["dashboard.gym.read"],
     ),
     queryFn: ({ signal }) =>
       getGymDashboard(
@@ -275,7 +284,10 @@ function AnalyticsContent({
       : (gymQuery.data ?? null);
   const trainerQuery = useQuery({
     enabled: Boolean(
-      identity && hasDataPermission && decisions["dashboard.trainer.read"],
+      !workspaceUnavailable &&
+      identity &&
+      hasDataPermission &&
+      decisions["dashboard.trainer.read"],
     ),
     queryFn: ({ signal }) =>
       getTrainerDashboard(apiClient, identity!.workspaceId, {}, signal),
@@ -290,7 +302,10 @@ function AnalyticsContent({
       : (trainerQuery.data ?? null);
   const relationshipDashboardQuery = useQuery({
     enabled: Boolean(
-      identity && validRelationship && decisions["dashboard.relationship.read"],
+      !workspaceUnavailable &&
+      identity &&
+      validRelationship &&
+      decisions["dashboard.relationship.read"],
     ),
     queryFn: ({ signal }) =>
       getRelationshipDashboard(
@@ -306,6 +321,7 @@ function AnalyticsContent({
   });
   const trainingQuery = useQuery({
     enabled: Boolean(
+      !workspaceUnavailable &&
       identity &&
       rangeValid &&
       validRelationship &&
@@ -326,6 +342,7 @@ function AnalyticsContent({
   });
   const nutritionQuery = useQuery({
     enabled: Boolean(
+      !workspaceUnavailable &&
       identity &&
       rangeValid &&
       validRelationship &&
@@ -346,6 +363,7 @@ function AnalyticsContent({
   });
   const adherenceQuery = useQuery({
     enabled: Boolean(
+      !workspaceUnavailable &&
       identity &&
       rangeValid &&
       validRelationship &&
@@ -376,6 +394,7 @@ function AnalyticsContent({
   );
   const progressQuery = useQuery({
     enabled: Boolean(
+      !workspaceUnavailable &&
       identity &&
       rangeValid &&
       validRelationship &&
@@ -409,6 +428,45 @@ function AnalyticsContent({
     progressOverride?.key === progressKey
       ? progressOverride.data
       : (progressQuery.data ?? null);
+
+  const queryErrors = [
+    [labels.gym, gymQuery.error],
+    [labels.trainer, trainerQuery.error],
+    [labels.relationship, relationshipsQuery.error],
+    [labels.metric, metricsQuery.error],
+    [labels.relationshipDashboard, relationshipDashboardQuery.error],
+    [labels.training, trainingQuery.error],
+    [labels.progress, progressQuery.error],
+    [labels.nutrition, nutritionQuery.error],
+    [labels.adherence, adherenceQuery.error],
+  ] as const;
+  const queryFetching = [
+    gymQuery,
+    trainerQuery,
+    relationshipsQuery,
+    metricsQuery,
+    relationshipDashboardQuery,
+    trainingQuery,
+    progressQuery,
+    nutritionQuery,
+    adherenceQuery,
+  ].some((query) => query.isFetching);
+  const workspaceInactiveError = queryErrors.find(([, error]) =>
+    isWorkspaceInactive(error),
+  );
+  const hasRetryableError = queryErrors.some(([, error]) =>
+    isRetryableAnalyticsError(error),
+  );
+  useEffect(() => {
+    if (!workspaceInactiveError) return;
+    const timer = window.setTimeout(() => setWorkspaceUnavailable(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [workspaceInactiveError]);
+  useEffect(() => {
+    if (queryFetching || message !== labels.refreshing) return;
+    const timer = window.setTimeout(() => setMessage(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [labels.refreshing, message, queryFetching]);
 
   useEffect(() => {
     const errors = [
@@ -462,6 +520,7 @@ function AnalyticsContent({
     const pendingKey = `gym|${kind}|${category ?? ""}|${cursor}`;
     if (pendingPages.current.has(pendingKey)) return;
     pendingPages.current.add(pendingKey);
+    setPendingPageCount((count) => count + 1);
     const captured = createPaginationGuard({
       category,
       cursor,
@@ -473,6 +532,7 @@ function AnalyticsContent({
         ? { branchCursor: cursor, branchLimit: 25 }
         : kind === "attention"
           ? {
+              ...(branchId ? { branchId } : {}),
               attentionCategory: category as never,
               attentionCursor: cursor,
               attentionLimit: 20,
@@ -501,10 +561,15 @@ function AnalyticsContent({
         )
       )
         return;
-      setGymOverride({
+      setGymOverride((current) => ({
         key: identityToken,
-        data: mergeGymPage(gym, page, kind, category),
-      });
+        data: mergeGymPage(
+          current?.key === identityToken ? current.data : gym,
+          page,
+          kind,
+          category,
+        ),
+      }));
     } catch (error) {
       if (
         !mounted.current ||
@@ -519,16 +584,22 @@ function AnalyticsContent({
         )
       )
         return;
-      if (isCursorError(error)) await resetGymPage(kind, category);
-      else if (kind === "activity" && isRecentActivityDenied(error)) {
-        setGymOverride({
+      if (isCursorError(error)) {
+        setMessage(labels.recovering);
+        await resetGymPage(kind, category);
+      } else if (kind === "activity" && isRecentActivityDenied(error)) {
+        setGymOverride((current) => ({
           key: identityToken,
-          data: { ...gym, recentActivity: null },
-        });
+          data: {
+            ...(current?.key === identityToken ? current.data : gym),
+            recentActivity: null,
+          },
+        }));
         setMessage(labels.recentUnavailable);
       } else setMessage(errorText(error, labels));
     } finally {
       pendingPages.current.delete(pendingKey);
+      setPendingPageCount((count) => Math.max(0, count - 1));
     }
   }
   async function loadTrainerAttention(category: string, cursor: string) {
@@ -536,6 +607,7 @@ function AnalyticsContent({
     const pendingKey = `trainer|${category}|${cursor}`;
     if (pendingPages.current.has(pendingKey)) return;
     pendingPages.current.add(pendingKey);
+    setPendingPageCount((count) => count + 1);
     const captured = createPaginationGuard({
       category,
       cursor,
@@ -566,22 +638,28 @@ function AnalyticsContent({
       const current =
         trainer.needsAttention[category as keyof typeof trainer.needsAttention];
       if (incoming && current)
-        setTrainerOverride({
-          key: identityToken,
-          data: {
-            ...trainer,
-            needsAttention: {
-              ...trainer.needsAttention,
-              [category]: {
-                ...incoming,
-                items: appendCurrentPage(
-                  current.items,
-                  incoming.items,
-                  (item) => `${item.relationshipId}|${item.checkInId ?? ""}`,
-                ),
+        setTrainerOverride((override) => {
+          const base =
+            override?.key === identityToken ? override.data : trainer;
+          return {
+            key: identityToken,
+            data: {
+              ...base,
+              needsAttention: {
+                ...base.needsAttention,
+                [category]: {
+                  ...incoming,
+                  items: appendCurrentPage(
+                    base.needsAttention[
+                      category as keyof typeof base.needsAttention
+                    ]?.items ?? current.items,
+                    incoming.items,
+                    (item) => `${item.relationshipId}|${item.checkInId ?? ""}`,
+                  ),
+                },
               },
             },
-          },
+          };
         });
     } catch (error) {
       if (
@@ -598,6 +676,7 @@ function AnalyticsContent({
       )
         return;
       if (isCursorError(error)) {
+        setMessage(labels.recovering);
         try {
           const reset = await getTrainerDashboard(
             apiClient,
@@ -614,23 +693,38 @@ function AnalyticsContent({
             identityRef.current === identityToken &&
             replacement
           )
-            setTrainerOverride({
-              key: identityToken,
-              data: {
-                ...trainer,
-                needsAttention: {
-                  ...trainer.needsAttention,
-                  [category]: replacement,
+            setTrainerOverride((override) => {
+              const base =
+                override?.key === identityToken ? override.data : trainer;
+              return {
+                key: identityToken,
+                data: {
+                  ...base,
+                  needsAttention: {
+                    ...base.needsAttention,
+                    [category]: replacement,
+                  },
                 },
-              },
+              };
             });
-          setMessage(labels.cursorReset);
+          if (
+            mounted.current &&
+            captured.generation === paginationGeneration.current &&
+            captured.identity === identityRef.current
+          )
+            setMessage(labels.cursorReset);
         } catch {
-          setMessage(labels.unavailable);
+          if (
+            mounted.current &&
+            captured.generation === paginationGeneration.current &&
+            captured.identity === identityRef.current
+          )
+            setMessage(labels.unavailable);
         }
       } else setMessage(errorText(error, labels));
     } finally {
       pendingPages.current.delete(pendingKey);
+      setPendingPageCount((count) => Math.max(0, count - 1));
     }
   }
   async function resetGymPage(
@@ -644,7 +738,11 @@ function AnalyticsContent({
       kind === "branch"
         ? { branchLimit: 25 }
         : kind === "attention"
-          ? { attentionCategory: category as never, attentionLimit: 20 }
+          ? {
+              ...(branchId ? { branchId } : {}),
+              attentionCategory: category as never,
+              attentionLimit: 20,
+            }
           : { activityCategory: category as never, activityLimit: 20 };
     try {
       const page = await getGymDashboard(
@@ -658,14 +756,24 @@ function AnalyticsContent({
         resetGeneration === paginationGeneration.current &&
         resetIdentity === identityRef.current
       ) {
-        setGymOverride({
+        setGymOverride((current) => ({
           key: identityToken,
-          data: replaceGymPage(gym, page, kind, category),
-        });
+          data: replaceGymPage(
+            current?.key === identityToken ? current.data : gym,
+            page,
+            kind,
+            category,
+          ),
+        }));
         setMessage(labels.cursorReset);
       }
     } catch {
-      setMessage(labels.unavailable);
+      if (
+        mounted.current &&
+        resetGeneration === paginationGeneration.current &&
+        resetIdentity === identityRef.current
+      )
+        setMessage(labels.unavailable);
     }
   }
   async function loadMoreProgress() {
@@ -680,6 +788,7 @@ function AnalyticsContent({
     const pendingKey = `progress|${cursor}`;
     if (pendingPages.current.has(pendingKey)) return;
     pendingPages.current.add(pendingKey);
+    setPendingPageCount((count) => count + 1);
     const captured = createPaginationGuard({
       cursor,
       generation: paginationGeneration.current,
@@ -735,6 +844,7 @@ function AnalyticsContent({
       } else setMessage(errorText(error, labels));
     } finally {
       pendingPages.current.delete(pendingKey);
+      setPendingPageCount((count) => Math.max(0, count - 1));
     }
   }
   async function loadMoreMetrics() {
@@ -743,6 +853,7 @@ function AnalyticsContent({
     const pendingKey = `metrics|${cursor}`;
     if (pendingPages.current.has(pendingKey)) return;
     pendingPages.current.add(pendingKey);
+    setPendingPageCount((count) => count + 1);
     try {
       const next = await listAnalyticsMetrics(apiClient, identity.workspaceId, {
         cursor,
@@ -769,6 +880,7 @@ function AnalyticsContent({
       } else setMessage(errorText(error, labels));
     } finally {
       pendingPages.current.delete(pendingKey);
+      setPendingPageCount((count) => Math.max(0, count - 1));
     }
   }
 
@@ -776,12 +888,41 @@ function AnalyticsContent({
     return <State message={labels.support} />;
   if (!currentIdentity) return <State message={labels.loading} busy />;
   if (!hasDataPermission) return <State message={labels.denied} />;
-  const anyError = [
-    gymQuery.error,
-    trainerQuery.error,
-    relationshipsQuery.error,
-    metricsQuery.error,
-  ].find(Boolean);
+  if (workspaceUnavailable || workspaceInactiveError)
+    return <State message={labels.workspaceInactive} />;
+
+  const refresh = () => {
+    paginationGeneration.current += 1;
+    setGymOverride(null);
+    setTrainerOverride(null);
+    setProgressOverride(null);
+    setMetricsOverride(null);
+    setMessage(labels.refreshing);
+    if (decisions["dashboard.gym.read"]) void gymQuery.refetch();
+    if (decisions["dashboard.trainer.read"]) void trainerQuery.refetch();
+    if (decisions["trainees.read"]) void relationshipsQuery.refetch();
+    if (
+      decisions["analytics.progress.read"] &&
+      decisions["metric_definitions.read"]
+    )
+      void metricsQuery.refetch();
+    if (!validRelationship) return;
+    if (decisions["dashboard.relationship.read"])
+      void relationshipDashboardQuery.refetch();
+    if (rangeValid && decisions["analytics.training.read"])
+      void trainingQuery.refetch();
+    if (rangeValid && decisions["analytics.nutrition.read"])
+      void nutritionQuery.refetch();
+    if (rangeValid && decisions["analytics.adherence.read"])
+      void adherenceQuery.refetch();
+    if (
+      rangeValid &&
+      validMetric &&
+      decisions["analytics.progress.read"] &&
+      decisions["metric_definitions.read"]
+    )
+      void progressQuery.refetch();
+  };
 
   return (
     <section
@@ -794,43 +935,38 @@ function AnalyticsContent({
           <h1 id="analytics-title">{labels.title}</h1>
           <p>{labels.description}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (decisions["dashboard.gym.read"]) void gymQuery.refetch();
-            if (decisions["dashboard.trainer.read"])
-              void trainerQuery.refetch();
-            if (decisions["trainees.read"]) void relationshipsQuery.refetch();
-            if (
-              decisions["analytics.progress.read"] &&
-              decisions["metric_definitions.read"]
-            )
-              void metricsQuery.refetch();
-            if (validRelationship) {
-              if (decisions["dashboard.relationship.read"])
-                void relationshipDashboardQuery.refetch();
-              if (rangeValid && decisions["analytics.training.read"])
-                void trainingQuery.refetch();
-              if (rangeValid && decisions["analytics.nutrition.read"])
-                void nutritionQuery.refetch();
-              if (rangeValid && decisions["analytics.adherence.read"])
-                void adherenceQuery.refetch();
-              if (
-                rangeValid &&
-                validMetric &&
-                decisions["analytics.progress.read"] &&
-                decisions["metric_definitions.read"]
-              )
-                void progressQuery.refetch();
-            }
-          }}
-        >
+        <button type="button" onClick={refresh}>
           {labels.refresh}
         </button>
       </header>
       {message ? <p role="status">{message}</p> : null}
+      {pendingPageCount > 0 ? (
+        <p role="status" aria-live="polite">
+          {labels.loadingMore}
+        </p>
+      ) : null}
+      {queryFetching && pendingPageCount === 0 ? (
+        <p role="status" aria-live="polite">
+          {labels.loading}
+        </p>
+      ) : null}
+      {queryErrors.some(([, error]) => Boolean(error)) ? (
+        <div aria-live="polite">
+          {queryErrors.map(([label, error]) =>
+            error && !isWorkspaceInactive(error) ? (
+              <p role="alert" key={label}>
+                {label}: {errorText(error, labels)}
+              </p>
+            ) : null,
+          )}
+          {hasRetryableError ? (
+            <button type="button" onClick={refresh}>
+              {labels.retry}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {!rangeValid ? <p role="alert">{labels.invalidRange}</p> : null}
-      {anyError ? <p role="alert">{errorText(anyError, labels)}</p> : null}
       <div className={styles.filters}>
         <label>
           {labels.relationship}
@@ -845,7 +981,7 @@ function AnalyticsContent({
             <option value="">—</option>
             {relationshipsQuery.data?.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.id} · {item.status}
+                {item.id} · {labels[`value_${item.status}`] ?? item.status}
               </option>
             ))}
           </select>
@@ -1018,6 +1154,21 @@ function isRecentActivityDenied(error: unknown) {
     error.code === "RECENT_ACTIVITY_NOT_ALLOWED"
   );
 }
+function isWorkspaceInactive(error: unknown) {
+  return (
+    isApiError(error) &&
+    error.kind === "backend" &&
+    error.code === "WORKSPACE_INACTIVE"
+  );
+}
+function isRetryableAnalyticsError(error: unknown) {
+  return (
+    isApiError(error) &&
+    (error.kind === "network" ||
+      error.kind === "non-json-response" ||
+      (error.kind === "backend" && (error.status ?? 0) >= 500))
+  );
+}
 function isNotFound(error: unknown) {
   return isApiError(error) && error.kind === "backend" && error.status === 404;
 }
@@ -1048,6 +1199,7 @@ function errorText(error: unknown, labels: AnalyticsLabels) {
   )
     return labels.invalidRange;
   if (error.status === 403) return labels.deniedSection;
+  if (error.status === 422) return labels.invalidFilters;
   return labels.unavailable;
 }
 function mergeGymPage(

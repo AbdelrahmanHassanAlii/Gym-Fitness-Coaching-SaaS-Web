@@ -24,7 +24,7 @@ export function GymDashboardPanel({
       />
       <AnalyticsSeriesTable
         caption={labels.summary}
-        rows={[data.summary]}
+        rows={[data.summary] as unknown as readonly Record<string, unknown>[]}
         labels={tableLabels(labels)}
       />
       <h3>{labels.branches}</h3>

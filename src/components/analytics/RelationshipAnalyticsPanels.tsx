@@ -31,7 +31,7 @@ export function RelationshipAnalyticsPanel({
       />
       <AnalyticsSeriesTable
         caption={`${title}: ${labels.series}`}
-        rows={rows as readonly Record<string, unknown>[]}
+        rows={rows as unknown as readonly Record<string, unknown>[]}
         labels={labels}
       />
     </section>

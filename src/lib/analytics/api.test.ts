@@ -114,6 +114,19 @@ describe("analytics API", () => {
     }
   });
 
+  test("preserves offset-qualified analytics inputs exactly", async () => {
+    const request = vi.fn().mockResolvedValue({ data: trainingAnalytics() });
+    const api = { request } as unknown as ApiClient;
+    await getTrainingAnalytics(api, "workspace_a", "relationship_a", {
+      from: "2026-03-08T00:00:00.000-05:00",
+      to: "2026-03-09T00:00:00.000-04:00",
+      granularity: "day",
+    });
+    const path = decodeURIComponent(String(request.mock.calls[0]?.[0].path));
+    expect(path).toContain("from=2026-03-08T00:00:00.000-05:00");
+    expect(path).toContain("to=2026-03-09T00:00:00.000-04:00");
+  });
+
   test("fails closed on a malformed sensitive response", async () => {
     const api = {
       request: vi.fn().mockResolvedValue({
@@ -159,12 +172,26 @@ describe("analytics API", () => {
     };
     const request = vi
       .fn()
-      .mockResolvedValueOnce({ data: [relationship] })
+      .mockResolvedValueOnce({
+        data: {
+          data: [
+            relationship,
+            {
+              ...relationship,
+              id: "relationship_b",
+              status: "NEEDS_REASSIGNMENT",
+            },
+            { ...relationship, id: "relationship_c", status: "ENDED" },
+          ],
+          meta: { hasMore: false, nextCursor: null },
+        },
+      })
       .mockResolvedValueOnce({ data: [metric], nextCursor: "opaque-next" });
     const api = { request } as unknown as ApiClient;
 
     expect(await listAnalyticsRelationships(api, "workspace_a")).toEqual([
       relationship,
+      { ...relationship, id: "relationship_b", status: "NEEDS_REASSIGNMENT" },
     ]);
     expect(
       await listAnalyticsMetrics(api, "workspace_a", {
@@ -184,6 +211,165 @@ describe("analytics API", () => {
         signal: undefined,
       },
     ]);
+  });
+
+  test("rejects flat, malformed-meta, and cross-workspace relationship pages", async () => {
+    const relationship = {
+      id: "relationship_a",
+      workspaceId: "workspace_a",
+      traineeUserId: "trainee_a",
+      status: "ACTIVE",
+      engagementPeriods: [],
+      version: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    for (const response of [
+      { data: [relationship] },
+      { data: { data: [relationship], meta: { nextCursor: null } } },
+      {
+        data: {
+          data: [relationship],
+          meta: { hasMore: false, nextCursor: 42 },
+        },
+      },
+      {
+        data: {
+          data: [{ ...relationship, workspaceId: "workspace_b" }],
+          meta: { hasMore: false, nextCursor: null },
+        },
+      },
+    ]) {
+      const api = {
+        request: vi.fn().mockResolvedValue(response),
+      } as unknown as ApiClient;
+      await expect(
+        listAnalyticsRelationships(api, "workspace_a"),
+      ).rejects.toMatchObject({ kind: "malformed-response" });
+    }
+  });
+
+  test("rejects progress responses for the wrong requested or nested metric", async () => {
+    const wrongTopLevel = {
+      request: vi.fn().mockResolvedValue({
+        data: { ...progressAnalytics(), metricDefinitionId: "metric_b" },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getProgressAnalytics(wrongTopLevel, "workspace_a", "relationship_a", {
+        metricDefinitionId: "metric_a",
+      }),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+
+    const point = {
+      id: "point_a",
+      value: 80,
+      unit: "kg",
+      metricDefinitionId: "metric_b",
+      metricKey: "weight",
+      metricName: "Weight",
+      measuredAt: "2026-03-08T06:00:00.000Z",
+    };
+    const wrongNested = {
+      request: vi.fn().mockResolvedValue({
+        data: { ...progressAnalytics(), points: [point] },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getProgressAnalytics(wrongNested, "workspace_a", "relationship_a", {
+        metricDefinitionId: "metric_a",
+      }),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+  });
+
+  test("fails closed on malformed nested Stage 18 analytics sections", async () => {
+    const malformedPoint = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          ...progressAnalytics(),
+          points: [
+            {
+              id: "point_a",
+              value: 80,
+              metricDefinitionId: "metric_a",
+              metricKey: null,
+              metricName: "Weight",
+              measuredAt: range.from,
+            },
+          ],
+        },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getProgressAnalytics(malformedPoint, "workspace_a", "relationship_a", {
+        metricDefinitionId: "metric_a",
+      }),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+
+    const malformedBucket = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          ...progressAnalytics(),
+          buckets: [{ key: "2026-03-08", from: range.from, to: range.to }],
+        },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getProgressAnalytics(malformedBucket, "workspace_a", "relationship_a", {
+        metricDefinitionId: "metric_a",
+      }),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+
+    const malformedAdherence = {
+      request: vi.fn().mockResolvedValue({
+        data: { ...adherenceAnalytics(), training: { startedSessions: 1 } },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getAdherenceAnalytics(
+        malformedAdherence,
+        "workspace_a",
+        "relationship_a",
+        {},
+      ),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+
+    const malformedRelationshipSection = {
+      request: vi.fn().mockResolvedValue({
+        data: { ...relationshipDashboard(), training: { summary: {} } },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getRelationshipDashboard(
+        malformedRelationshipSection,
+        "workspace_a",
+        "relationship_a",
+      ),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+
+    const malformedVisibility = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          ...relationshipDashboard(),
+          access: {
+            actorKind: "TRAINER",
+            sections: {
+              training: "yes",
+              nutrition: false,
+              progress: true,
+              checkIns: true,
+            },
+          },
+        },
+      }),
+    } as unknown as ApiClient;
+    await expect(
+      getRelationshipDashboard(
+        malformedVisibility,
+        "workspace_a",
+        "relationship_a",
+      ),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
   });
 
   test("isolates every access and filter identity dimension", () => {
@@ -277,7 +463,7 @@ function relationshipDashboard() {
     nutrition: null,
     progress: null,
     checkIns: null,
-    adherence: null,
+    adherence: adherenceAnalytics(),
     needsAttention: {},
     access: {
       actorKind: "TRAINER",

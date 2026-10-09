@@ -162,7 +162,11 @@ export async function getProgressAnalytics(
     isProgressAnalyticsDto,
     "progress analytics",
     signal,
-    { relationshipId, workspaceId },
+    {
+      relationshipId,
+      workspaceId,
+      metricDefinitionId: query.metricDefinitionId,
+    },
   );
 }
 export async function getNutritionAnalytics(
@@ -210,19 +214,21 @@ export async function listAnalyticsRelationships(
     signal,
   });
   if (
-    !Array.isArray(envelope.data) ||
-    !envelope.data.every(isCoachingRelationshipDto)
+    !isRecord(envelope.data) ||
+    !Array.isArray(envelope.data.data) ||
+    !envelope.data.data.every(isCoachingRelationshipDto) ||
+    !isRelationshipPageMeta(envelope.data.meta)
   )
     throw new ApiError({
       kind: "malformed-response",
       message: "Malformed analytics relationships response.",
     });
-  if (envelope.data.some((item) => item.workspaceId !== workspaceId))
+  if (envelope.data.data.some((item) => item.workspaceId !== workspaceId))
     throw new ApiError({
       kind: "malformed-response",
       message: "Mismatched analytics relationship workspace.",
     });
-  return envelope.data.filter(
+  return envelope.data.data.filter(
     (item) => item.status === "ACTIVE" || item.status === "NEEDS_REASSIGNMENT",
   );
 }
@@ -275,7 +281,11 @@ async function get<T>(
   guard: (value: unknown) => value is T,
   label: string,
   signal?: AbortSignal,
-  expected?: { relationshipId?: string; workspaceId: string },
+  expected?: {
+    metricDefinitionId?: string;
+    relationshipId?: string;
+    workspaceId: string;
+  },
 ): Promise<T> {
   const queryString = serializeQueryParams(query as never);
   const envelope = await api.request<{ data: unknown }>({
@@ -294,13 +304,28 @@ async function get<T>(
       expected.workspaceId ||
       (expected.relationshipId !== undefined &&
         (envelope.data as { relationshipId?: unknown }).relationshipId !==
-          expected.relationshipId))
+          expected.relationshipId) ||
+      (expected.metricDefinitionId !== undefined &&
+        (envelope.data as { metricDefinitionId?: unknown })
+          .metricDefinitionId !== expected.metricDefinitionId))
   )
     throw new ApiError({
       kind: "malformed-response",
       message: `Mismatched ${label} identity.`,
     });
   return envelope.data;
+}
+
+function isRelationshipPageMeta(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.hasMore === "boolean" &&
+    (value.nextCursor === null || typeof value.nextCursor === "string")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function detail(
   identity: AnalyticsAccessIdentity,

@@ -8,7 +8,7 @@ import {
 } from "./pagination";
 
 describe("analytics pagination", () => {
-  test("QA-019 deduplicates IDs while preserving Backend order across more than 500 points", () => {
+  test("deduplicates IDs while preserving Backend order", () => {
     const first = Array.from({ length: 500 }, (_, index) => ({
       id: `point-${index}`,
       measuredAt: `2026-01-01T00:${String(index % 60).padStart(2, "0")}:00.000Z`,
@@ -24,7 +24,7 @@ describe("analytics pagination", () => {
     expect(merged.at(-1)?.id).toBe("point-500");
   });
 
-  test("QA-020 isolates category cursors and discards stale successes or errors", () => {
+  test("matches category, cursor, identity, and generation guards", () => {
     const captured = createPaginationGuard({
       category: "CHECKIN_OVERDUE",
       cursor: "cursor-a",
@@ -46,12 +46,14 @@ describe("analytics pagination", () => {
     ).toBe(false);
   });
 
-  test("QA-027 uses calendar dates, accepts 366 days, and rejects larger ranges", () => {
+  test("uses inclusive Backend calendar-day limits without fixed-hour arithmetic", () => {
     expect(calendarDateAfter("2026-03-08", 1)).toBe("2026-03-09");
     expect(calendarDateAfter("2026-11-01", 1)).toBe("2026-11-02");
     expect(calendarDateAfter("2026-02-29", 1)).toBeNull();
-    expect(localDateRangeWithinLimit("2026-01-01", "2027-01-02")).toBe(true);
-    expect(localDateRangeWithinLimit("2026-01-01", "2027-01-03")).toBe(false);
+    expect(localDateRangeWithinLimit("2026-01-01", "2027-01-01")).toBe(true);
+    expect(localDateRangeWithinLimit("2026-01-01", "2027-01-02")).toBe(false);
+    expect(localDateRangeWithinLimit("2026-03-08", "2027-03-08")).toBe(true);
+    expect(localDateRangeWithinLimit("2026-03-08", "2027-03-09")).toBe(false);
 
     const shortDay =
       Date.parse("2026-03-09T04:00:00.000Z") -

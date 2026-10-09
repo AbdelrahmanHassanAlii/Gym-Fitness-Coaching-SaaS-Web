@@ -7,7 +7,7 @@ export function AnalyticsSeriesTable({
   rows: readonly Record<string, unknown>[];
   labels: Record<string, string>;
 }) {
-  if (rows.length === 0) return <p>{labels.empty}</p>;
+  if (rows.length === 0) return <p role="status">{labels.empty}</p>;
   return (
     <div role="region" aria-label={caption} tabIndex={0}>
       <table>
