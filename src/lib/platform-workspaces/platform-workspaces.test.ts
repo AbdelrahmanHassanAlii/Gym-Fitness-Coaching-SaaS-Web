@@ -1,8 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import type { MembershipId, UserId } from "@/contracts";
+import type { MembershipId, UserId, WorkspaceId } from "@/contracts";
 import type { ApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import {
+  getPlatformWorkspace,
   listPlatformWorkspaces,
   platformWorkspaceDirectoryKeys,
   platformWorkspacePageLimit,
@@ -28,13 +29,19 @@ describe("Platform workspace directory contract", () => {
       signal: undefined,
     });
 
-    await listPlatformWorkspaces(apiClient, "68e7a9d10d56fd2b98d4a100");
+    await listPlatformWorkspaces(apiClient, {
+      cursor: "opaque:next:+/=",
+      q: "Alpha Gym",
+      status: "ACTIVE",
+    });
     expect(request).toHaveBeenNthCalledWith(2, {
       method: "GET",
       path: "/platform/workspaces",
       query: {
-        cursor: "68e7a9d10d56fd2b98d4a100",
+        cursor: "opaque:next:+/=",
         limit: platformWorkspacePageLimit,
+        q: "Alpha Gym",
+        status: "ACTIVE",
       },
       signal: undefined,
     });
@@ -47,7 +54,9 @@ describe("Platform workspace directory contract", () => {
       limit: 50,
       membershipId: "membership-a" as MembershipId,
       principalId: "user-a" as UserId,
+      q: "alpha",
       sessionGeneration: 4,
+      status: "ACTIVE" as const,
     } as const;
     const key = platformWorkspaceDirectoryKeys.list(identity);
     expect(key).toEqual([
@@ -60,7 +69,9 @@ describe("Platform workspace directory contract", () => {
         limit: 50,
         membershipId: "membership-a",
         principalId: "user-a",
+        q: "alpha",
         sessionGeneration: 4,
+        status: "ACTIVE",
       },
     ]);
     for (const changed of [
@@ -69,6 +80,8 @@ describe("Platform workspace directory contract", () => {
       { ...identity, membershipId: "membership-b" as MembershipId },
       { ...identity, accessVersion: 8 },
       { ...identity, authorityValidUntil: "2026-10-10T09:00:00.000Z" },
+      { ...identity, q: "beta" },
+      { ...identity, status: "ARCHIVED" as const },
     ]) {
       expect(platformWorkspaceDirectoryKeys.list(changed)).not.toEqual(key);
     }
@@ -152,7 +165,9 @@ describe("Platform workspace directory contract", () => {
     const apiClient = { request } as unknown as ApiClient;
 
     const firstPage = await listPlatformWorkspaces(apiClient);
-    await listPlatformWorkspaces(apiClient, firstPage.meta.nextCursor!);
+    await listPlatformWorkspaces(apiClient, {
+      cursor: firstPage.meta.nextCursor!,
+    });
 
     expect(request).toHaveBeenNthCalledWith(2, {
       method: "GET",
@@ -161,7 +176,89 @@ describe("Platform workspace directory contract", () => {
       signal: undefined,
     });
   });
+
+  test("strictly decodes the minimized Platform workspace detail", async () => {
+    const detail = {
+      id: workspace.id,
+      name: workspace.name,
+      type: "GYM",
+      status: workspace.status,
+      timezone: "Africa/Cairo",
+      defaultLanguage: "en",
+      createdAt: workspace.createdAt,
+      country: "EG",
+      governorate: "Cairo",
+      city: "Nasr City",
+    } as const;
+    const request = vi.fn().mockResolvedValue(detail);
+    const apiClient = { request } as unknown as ApiClient;
+
+    await expect(
+      getPlatformWorkspace(apiClient, workspace.id as WorkspaceId),
+    ).resolves.toEqual(detail);
+    expect(request).toHaveBeenCalledWith({
+      method: "GET",
+      path: `/platform/workspaces/${workspace.id}`,
+      signal: undefined,
+    });
+  });
+
+  test.each([
+    ["missing field", { ...detailFixture(), timezone: undefined }],
+    ["invalid type", { ...detailFixture(), type: "FRANCHISE" }],
+    ["invalid status", { ...detailFixture(), status: "DELETED" }],
+    ["invalid timestamp", { ...detailFixture(), createdAt: "2026-10-09" }],
+    ["internal field", { ...detailFixture(), ownerUserId: "user-a" }],
+    ["search field", { ...detailFixture(), nameSearchPrefixes: ["a"] }],
+    ["commercial field", { ...detailFixture(), subscription: {} }],
+    ["counts field", { ...detailFixture(), counts: { staff: 1 } }],
+  ])("fails closed for malformed detail: %s", async (_name, response) => {
+    const apiClient = {
+      request: vi.fn().mockResolvedValue(response),
+    } as unknown as ApiClient;
+
+    await expect(
+      getPlatformWorkspace(apiClient, workspace.id as WorkspaceId),
+    ).rejects.toMatchObject<Partial<ApiError>>({ kind: "malformed-response" });
+  });
+
+  test("separates detail cache identity by workspace and authority", () => {
+    const identity = {
+      accessVersion: 7,
+      authorityValidUntil: "2026-10-10T08:00:00.000Z",
+      membershipId: "membership-a" as MembershipId,
+      principalId: "user-a" as UserId,
+      sessionGeneration: 4,
+      workspaceId: workspace.id as WorkspaceId,
+    } as const;
+    const key = platformWorkspaceDirectoryKeys.detail(identity);
+    for (const changed of [
+      {
+        ...identity,
+        workspaceId: "68e7a9d10d56fd2b98d4a102" as WorkspaceId,
+      },
+      { ...identity, principalId: "user-b" as UserId },
+      { ...identity, sessionGeneration: 5 },
+      { ...identity, membershipId: "membership-b" as MembershipId },
+      { ...identity, accessVersion: 8 },
+      { ...identity, authorityValidUntil: null },
+    ]) {
+      expect(platformWorkspaceDirectoryKeys.detail(changed)).not.toEqual(key);
+    }
+  });
 });
+
+function detailFixture() {
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    type: "GYM",
+    status: workspace.status,
+    timezone: "Africa/Cairo",
+    defaultLanguage: "en",
+    createdAt: workspace.createdAt,
+  };
+}
 
 function page(row: unknown = workspace) {
   return {

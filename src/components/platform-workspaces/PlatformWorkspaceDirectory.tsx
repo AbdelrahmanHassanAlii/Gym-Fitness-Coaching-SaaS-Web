@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   useInfiniteQuery,
   useQueryClient,
@@ -11,6 +13,7 @@ import type {
   PlatformWorkspaceDirectoryRowDto,
   PlatformWorkspaceStatus,
 } from "@/contracts";
+import { platformWorkspaceStatuses } from "@/contracts";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
@@ -41,6 +44,7 @@ export interface PlatformWorkspaceDirectoryLabels {
   };
   columns: { createdAt: string; name: string; status: string };
   empty: string;
+  filteredEmpty: string;
   errors: {
     cursor: string;
     denied: string;
@@ -48,8 +52,19 @@ export interface PlatformWorkspaceDirectoryLabels {
     loadMore: string;
     malformed: string;
     unavailable: string;
+    validation: string;
   };
   loading: string;
+  search: {
+    allStatuses: string;
+    apply: string;
+    clear: string;
+    label: string;
+    placeholder: string;
+    statusLabel: string;
+    tooLong: string;
+    viewDetails: string;
+  };
   statuses: Record<PlatformWorkspaceStatus, string>;
   title: string;
 }
@@ -64,6 +79,16 @@ export function PlatformWorkspaceDirectory({
   const authority = usePlatformAuthority();
   const { apiClient, markSessionExpired } = useAuthSession();
   const queryClient = useQueryClient();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const committedQ = cleanCommittedQuery(searchParams.get("q"));
+  const rawStatus = searchParams.get("status");
+  const committedStatus = isPlatformWorkspaceStatus(rawStatus)
+    ? rawStatus
+    : undefined;
+  const [searchInput, setSearchInput] = useState(committedQ ?? "");
+  const [searchValidation, setSearchValidation] = useState<string | null>(null);
   const [domainDenied, setDomainDenied] = useState(false);
   const handledError = useRef<unknown>(null);
   const loadMoreFlight = useRef(false);
@@ -75,7 +100,9 @@ export function PlatformWorkspaceDirectory({
       limit: platformWorkspacePageLimit,
       membershipId: authority.membershipId,
       principalId: authority.principalId,
+      ...(committedQ === undefined ? {} : { q: committedQ }),
       sessionGeneration: authority.sessionGeneration,
+      ...(committedStatus === undefined ? {} : { status: committedStatus }),
     }),
     [
       authority.accessVersion,
@@ -83,6 +110,8 @@ export function PlatformWorkspaceDirectory({
       authority.principalId,
       authority.sessionGeneration,
       authority.validUntil,
+      committedQ,
+      committedStatus,
     ],
   );
   const queryKey = useMemo(
@@ -97,6 +126,21 @@ export function PlatformWorkspaceDirectory({
     setDomainDenied(false);
     handledError.current = null;
   }, [identityToken]);
+
+  useEffect(() => {
+    // Applied URL state is authoritative when navigation changes externally.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSearchInput(committedQ ?? "");
+    setSearchValidation(null);
+  }, [committedQ]);
+
+  useEffect(() => {
+    if (rawStatus === null || committedStatus !== undefined) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("status");
+    next.delete("cursor");
+    router.replace(routeWithQuery(pathname, next));
+  }, [committedStatus, pathname, rawStatus, router, searchParams]);
 
   useEffect(
     () => () => {
@@ -117,7 +161,15 @@ export function PlatformWorkspaceDirectory({
       lastPage.meta.hasMore ? lastPage.meta.nextCursor! : undefined,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
-      listPlatformWorkspaces(apiClient, pageParam, signal),
+      listPlatformWorkspaces(
+        apiClient,
+        {
+          ...(pageParam === undefined ? {} : { cursor: pageParam }),
+          ...(committedQ === undefined ? {} : { q: committedQ }),
+          ...(committedStatus === undefined ? {} : { status: committedStatus }),
+        },
+        signal,
+      ),
     queryKey,
     retry: false,
   });
@@ -191,6 +243,30 @@ export function PlatformWorkspaceDirectory({
     }
   }
 
+  function commitFilters(
+    q: string | undefined,
+    status: PlatformWorkspaceStatus | undefined,
+  ) {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("cursor");
+    if (q === undefined) next.delete("q");
+    else next.set("q", q);
+    if (status === undefined) next.delete("status");
+    else next.set("status", status);
+    router.replace(routeWithQuery(pathname, next));
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextQ = cleanCommittedQuery(searchInput);
+    if (nextQ !== undefined && normalizedCodePointLength(nextQ) > 64) {
+      setSearchValidation(labels.search.tooLong);
+      return;
+    }
+    setSearchValidation(null);
+    commitFilters(nextQ, committedStatus);
+  }
+
   if (initialError) {
     return (
       <section className={styles.directory} dir={getLocaleDirection(locale)}>
@@ -221,9 +297,63 @@ export function PlatformWorkspaceDirectory({
           {labels.actions.refresh}
         </button>
       </header>
+      <form className={styles.filters} onSubmit={submitSearch}>
+        <label className={styles.control}>
+          <span>{labels.search.label}</span>
+          <input
+            aria-invalid={searchValidation !== null || undefined}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder={labels.search.placeholder}
+            type="search"
+            value={searchInput}
+          />
+        </label>
+        <label className={styles.control}>
+          <span>{labels.search.statusLabel}</span>
+          <select
+            onChange={(event) =>
+              commitFilters(
+                committedQ,
+                isPlatformWorkspaceStatus(event.target.value)
+                  ? event.target.value
+                  : undefined,
+              )
+            }
+            value={committedStatus ?? ""}
+          >
+            <option value="">{labels.search.allStatuses}</option>
+            {platformWorkspaceStatuses.map((status) => (
+              <option key={status} value={status}>
+                {labels.statuses[status]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className={styles.filterActions}>
+          <button type="submit">{labels.search.apply}</button>
+          <button
+            disabled={committedQ === undefined && searchInput.length === 0}
+            onClick={() => {
+              setSearchInput("");
+              setSearchValidation(null);
+              commitFilters(undefined, committedStatus);
+            }}
+            type="button"
+          >
+            {labels.search.clear}
+          </button>
+        </div>
+        {searchValidation === null ? null : (
+          <p className={styles.error} role="alert">
+            {searchValidation}
+          </p>
+        )}
+      </form>
       {chain.rows.length === 0 ? (
         <p className={styles.empty} role="status">
-          {labels.empty}
+          {committedQ !== undefined || committedStatus !== undefined
+            ? labels.filteredEmpty
+            : labels.empty}
         </p>
       ) : (
         <div className={styles.tableFrame}>
@@ -239,7 +369,19 @@ export function PlatformWorkspaceDirectory({
               {chain.rows.map((workspace) => (
                 <tr key={workspace.id}>
                   <td data-label={labels.columns.name}>
-                    <strong>{workspace.name}</strong>
+                    <Link
+                      className={styles.workspaceLink}
+                      href={detailHref(
+                        workspace.id,
+                        committedQ,
+                        committedStatus,
+                      )}
+                    >
+                      {workspace.name}
+                      <span className={styles.visuallyHidden}>
+                        {` — ${labels.search.viewDetails}`}
+                      </span>
+                    </Link>
                   </td>
                   <td data-label={labels.columns.status}>
                     <span
@@ -331,7 +473,44 @@ function errorMessage(
   if (isApiError(error) && error.kind === "malformed-response") {
     return labels.errors.malformed;
   }
+  if (isApiError(error) && error.category === "validation") {
+    return labels.errors.validation;
+  }
   return continuation ? labels.errors.loadMore : labels.errors.unavailable;
+}
+
+function cleanCommittedQuery(value: string | null): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function normalizedCodePointLength(value: string): number {
+  return Array.from(value.trim().replace(/\s+/gu, " ")).length;
+}
+
+function isPlatformWorkspaceStatus(
+  value: string | null,
+): value is PlatformWorkspaceStatus {
+  return (
+    value !== null &&
+    (platformWorkspaceStatuses as readonly string[]).includes(value)
+  );
+}
+
+function routeWithQuery(pathname: string, query: URLSearchParams): string {
+  const value = query.toString();
+  return value.length === 0 ? pathname : `${pathname}?${value}`;
+}
+
+function detailHref(
+  workspaceId: string,
+  q: string | undefined,
+  status: PlatformWorkspaceStatus | undefined,
+): string {
+  const query = new URLSearchParams();
+  if (q !== undefined) query.set("q", q);
+  if (status !== undefined) query.set("status", status);
+  return routeWithQuery(`/platform/workspaces/${workspaceId}`, query);
 }
 
 function StatePanel({

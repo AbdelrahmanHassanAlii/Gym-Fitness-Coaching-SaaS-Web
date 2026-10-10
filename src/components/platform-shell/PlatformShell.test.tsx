@@ -113,7 +113,7 @@ describe("Platform shell", () => {
   });
 
   test("marks only the workspace route current and exposes its resolved authority identity", async () => {
-    mocks.pathname = "/platform/workspaces";
+    mocks.pathname = "/platform/workspaces/68e7a9d10d56fd2b98d4a101";
     mockActiveContext(7);
     mockDecisions(
       {

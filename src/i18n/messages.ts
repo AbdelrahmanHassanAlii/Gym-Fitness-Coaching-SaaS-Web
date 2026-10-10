@@ -204,6 +204,17 @@ export const messages = {
       },
       loading: "جارٍ تحميل مساحات العمل...",
       empty: "لا توجد مساحات عمل متاحة.",
+      filteredEmpty: "لا توجد مساحات عمل مطابقة للبحث أو عامل التصفية.",
+      search: {
+        label: "البحث باسم مساحة العمل",
+        placeholder: "مثال: أطلس",
+        apply: "بحث",
+        clear: "مسح البحث",
+        statusLabel: "تصفية حسب الحالة",
+        allStatuses: "كل الحالات",
+        tooLong: "يجب ألا يتجاوز البحث 64 محرفًا.",
+        viewDetails: "عرض التفاصيل",
+      },
       errors: {
         denied: "دليل مساحات العمل غير متاح لصلاحياتك الحالية.",
         forbidden: "لم تعد مخولًا بعرض مساحات العمل.",
@@ -212,6 +223,7 @@ export const messages = {
         unavailable: "تعذر تحميل مساحات العمل.",
         loadMore: "تعذر تحميل مساحات عمل إضافية.",
         cursor: "لم يعد موضع الدليل صالحًا. ابدأ من الصفحة الأولى.",
+        validation: "طلب البحث أو التصفية غير صالح.",
       },
       statuses: {
         PENDING_ACTIVATION: "بانتظار التفعيل",
@@ -220,6 +232,37 @@ export const messages = {
         SUSPENDED: "معلقة",
         ARCHIVED: "مؤرشفة",
       },
+    },
+    platformWorkspaceDetail: {
+      title: "تفاصيل مساحة العمل",
+      loading: "جارٍ تحميل تفاصيل مساحة العمل...",
+      actions: { back: "العودة إلى مساحات العمل", retry: "إعادة المحاولة" },
+      errors: {
+        denied: "تفاصيل مساحة العمل غير متاحة لصلاحياتك الحالية.",
+        forbidden: "لم تعد مخولًا بعرض تفاصيل مساحة العمل.",
+        malformed: "أعاد الخادم بيانات غير متوقعة، لذا توقفت الواجهة بأمان.",
+        notFound: "لم يتم العثور على مساحة العمل.",
+        unavailable: "تعذر تحميل تفاصيل مساحة العمل.",
+      },
+      sections: {
+        workspace: "مساحة العمل",
+        configuration: "الإعدادات",
+        location: "الموقع",
+        metadata: "البيانات الوصفية",
+      },
+      fields: {
+        name: "الاسم",
+        type: "النوع",
+        status: "الحالة",
+        timezone: "المنطقة الزمنية",
+        defaultLanguage: "اللغة الافتراضية",
+        country: "الدولة",
+        governorate: "المحافظة",
+        city: "المدينة",
+        createdAt: "تاريخ الإنشاء",
+      },
+      types: { GYM: "نادي رياضي", INDEPENDENT_TRAINER: "مدرب مستقل" },
+      languages: { ar: "العربية", en: "الإنجليزية" },
     },
     notifications: {
       title: "الإشعارات",
@@ -1317,6 +1360,17 @@ export const messages = {
       },
       loading: "Loading workspaces...",
       empty: "No workspaces are available.",
+      filteredEmpty: "No workspaces match the current search or filter.",
+      search: {
+        label: "Search by workspace name",
+        placeholder: "For example, Atlas",
+        apply: "Search",
+        clear: "Clear search",
+        statusLabel: "Filter by status",
+        allStatuses: "All statuses",
+        tooLong: "Search must be no more than 64 characters.",
+        viewDetails: "View details",
+      },
       errors: {
         denied:
           "The workspace directory is unavailable for your current access.",
@@ -1327,6 +1381,7 @@ export const messages = {
         loadMore: "Additional workspaces could not be loaded.",
         cursor:
           "The directory position is no longer valid. Restart from the first page.",
+        validation: "The search or filter request is invalid.",
       },
       statuses: {
         PENDING_ACTIVATION: "Pending activation",
@@ -1335,6 +1390,38 @@ export const messages = {
         SUSPENDED: "Suspended",
         ARCHIVED: "Archived",
       },
+    },
+    platformWorkspaceDetail: {
+      title: "Workspace detail",
+      loading: "Loading workspace detail...",
+      actions: { back: "Back to workspaces", retry: "Retry" },
+      errors: {
+        denied: "Workspace detail is unavailable for your current access.",
+        forbidden: "You are no longer authorized to view workspace detail.",
+        malformed:
+          "The Backend returned unexpected data, so the detail view failed closed.",
+        notFound: "Workspace not found.",
+        unavailable: "Workspace detail could not be loaded.",
+      },
+      sections: {
+        workspace: "Workspace",
+        configuration: "Configuration",
+        location: "Location",
+        metadata: "Metadata",
+      },
+      fields: {
+        name: "Name",
+        type: "Workspace type",
+        status: "Status",
+        timezone: "Timezone",
+        defaultLanguage: "Default language",
+        country: "Country",
+        governorate: "Governorate",
+        city: "City",
+        createdAt: "Created at",
+      },
+      types: { GYM: "Gym", INDEPENDENT_TRAINER: "Independent trainer" },
+      languages: { ar: "Arabic", en: "English" },
     },
     notifications: {
       title: "Notifications",

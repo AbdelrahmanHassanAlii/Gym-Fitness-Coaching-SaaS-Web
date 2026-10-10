@@ -336,7 +336,10 @@ export function PlatformShell({
           {allowedPermissions.has(navigationPermissions.workspaces) ? (
             <Link
               aria-current={
-                pathname === "/platform/workspaces" ? "page" : undefined
+                pathname === "/platform/workspaces" ||
+                pathname.startsWith("/platform/workspaces/")
+                  ? "page"
+                  : undefined
               }
               className={styles.navLink}
               href="/platform/workspaces"

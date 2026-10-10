@@ -1,4 +1,5 @@
-import type { MembershipId } from "@/contracts/common/ids";
+import type { MembershipId, WorkspaceId } from "@/contracts/common/ids";
+import type { WorkspaceType } from "@/contracts/workspaces/contracts";
 
 export const platformMembershipStatuses = [
   "ACTIVE",
@@ -65,10 +66,23 @@ export type PlatformWorkspaceStatus =
   (typeof platformWorkspaceStatuses)[number];
 
 export interface PlatformWorkspaceDirectoryRowDto {
-  id: string;
+  id: WorkspaceId;
   name: string;
   status: PlatformWorkspaceStatus;
   createdAt: string;
+}
+
+export interface PlatformWorkspaceDetailDto {
+  id: WorkspaceId;
+  name: string;
+  type: WorkspaceType;
+  status: PlatformWorkspaceStatus;
+  timezone: string;
+  defaultLanguage: "ar" | "en";
+  createdAt: string;
+  country?: string;
+  city?: string;
+  governorate?: string;
 }
 
 export interface PlatformWorkspaceDirectoryPageDto {

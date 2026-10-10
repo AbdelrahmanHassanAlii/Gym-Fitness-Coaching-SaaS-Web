@@ -27,6 +27,15 @@ const mocks = vi.hoisted(() => ({
   },
   request: vi.fn(),
   markSessionExpired: vi.fn(),
+  pathname: "/platform/workspaces",
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => mocks.pathname,
+  useRouter: () => ({ replace: mocks.replace }),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 vi.mock("@/lib/platform-access", async (importOriginal) => {
@@ -61,6 +70,8 @@ describe("Platform workspace directory", () => {
   beforeEach(() => {
     mocks.request.mockReset();
     mocks.markSessionExpired.mockReset();
+    mocks.replace.mockReset();
+    mocks.searchParams = new URLSearchParams();
     mocks.authority.allows.mockReset();
     mocks.authority.allows.mockReturnValue(true);
     mocks.authority.refresh.mockReset();
@@ -95,6 +106,173 @@ describe("Platform workspace directory", () => {
     });
   });
 
+  test("commits q and status through URL state and starts a fresh query", async () => {
+    mocks.request
+      .mockResolvedValueOnce(page([row("101", "All", "ACTIVE")], null, false))
+      .mockResolvedValueOnce(page([row("102", "Alpha", "ACTIVE")], null, false))
+      .mockResolvedValueOnce(
+        page([row("102", "Alpha", "ACTIVE")], null, false),
+      );
+    const queryClient = testQueryClient();
+    const view = renderDirectory(queryClient);
+    expect(await screen.findByText("All")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search by workspace name"), {
+      target: { value: "Alpha" },
+    });
+    fireEvent.change(screen.getByLabelText("Filter by status"), {
+      target: { value: "ACTIVE" },
+    });
+    expect(mocks.replace).toHaveBeenCalledWith(
+      "/platform/workspaces?status=ACTIVE",
+    );
+
+    mocks.searchParams = new URLSearchParams("status=ACTIVE");
+    view.rerender(tree(queryClient));
+    await screen.findByText("Alpha");
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Search" }).closest("form")!,
+    );
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "/platform/workspaces?status=ACTIVE&q=Alpha",
+    );
+
+    mocks.searchParams = new URLSearchParams("q=Alpha&status=ACTIVE");
+    view.rerender(tree(queryClient));
+    expect(await screen.findByText("Alpha")).toBeInTheDocument();
+    expect(screen.queryByText("All")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Alpha/ })).toHaveAttribute(
+      "href",
+      "/platform/workspaces/68e7a9d10d56fd2b98d4a102?q=Alpha&status=ACTIVE",
+    );
+    expect(mocks.request).toHaveBeenLastCalledWith({
+      method: "GET",
+      path: "/platform/workspaces",
+      query: { limit: 50, q: "Alpha", status: "ACTIVE" },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("clears blank q, rejects more than 64 code points, and preserves emoji", async () => {
+    mocks.request.mockResolvedValue(page([], null, false));
+    const queryClient = testQueryClient();
+    const view = renderDirectory(queryClient);
+    await screen.findByText("No workspaces are available.");
+    const input = screen.getByLabelText("Search by workspace name");
+
+    fireEvent.change(input, { target: { value: "😀".repeat(64) } });
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Search" }).closest("form")!,
+    );
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      `/platform/workspaces?q=${encodeURIComponent("😀".repeat(64))}`,
+    );
+
+    const accepted = new URLSearchParams();
+    accepted.set("q", "😀".repeat(64));
+    mocks.searchParams = accepted;
+    view.rerender(tree(queryClient));
+    await screen.findByText(
+      "No workspaces match the current search or filter.",
+    );
+    expect(mocks.request).toHaveBeenLastCalledWith({
+      method: "GET",
+      path: "/platform/workspaces",
+      query: { limit: 50, q: "😀".repeat(64) },
+      signal: expect.any(AbortSignal),
+    });
+
+    fireEvent.change(screen.getByLabelText("Search by workspace name"), {
+      target: { value: "😀".repeat(65) },
+    });
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Search" }).closest("form")!,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("64 characters");
+
+    mocks.searchParams = new URLSearchParams("q=Alpha");
+    view.rerender(tree(queryClient));
+    await screen.findByText(
+      "No workspaces match the current search or filter.",
+    );
+    fireEvent.change(screen.getByLabelText("Search by workspace name"), {
+      target: { value: "   " },
+    });
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Search" }).closest("form")!,
+    );
+    expect(mocks.replace).toHaveBeenLastCalledWith("/platform/workspaces");
+  });
+
+  test.each([
+    "PENDING_ACTIVATION",
+    "ACTIVE",
+    "RESTRICTED",
+    "SUSPENDED",
+    "ARCHIVED",
+  ] as const)("sends the exact singular %s status", async (status) => {
+    mocks.searchParams = new URLSearchParams(`status=${status}`);
+    mocks.request.mockResolvedValue(page([], null, false));
+    renderDirectory();
+
+    await screen.findByText(
+      "No workspaces match the current search or filter.",
+    );
+    expect(mocks.request).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/platform/workspaces",
+      query: { limit: 50, status },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("removes an invalid URL status without sending it to Backend", async () => {
+    mocks.searchParams = new URLSearchParams("status=UNKNOWN");
+    mocks.request.mockResolvedValue(page([], null, false));
+    renderDirectory();
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith("/platform/workspaces"),
+    );
+    expect(mocks.request.mock.calls[0]?.[0].query).toEqual({ limit: 50 });
+  });
+
+  test("All statuses removes status and every filter commit drops cursor URL state", async () => {
+    mocks.searchParams = new URLSearchParams(
+      "q=Alpha&status=ACTIVE&cursor=must-not-survive",
+    );
+    mocks.request.mockResolvedValue(page([], null, false));
+    renderDirectory();
+    await screen.findByText(
+      "No workspaces match the current search or filter.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Filter by status"), {
+      target: { value: "" },
+    });
+    expect(mocks.replace).toHaveBeenCalledWith("/platform/workspaces?q=Alpha");
+  });
+
+  test("replays an opaque cursor unchanged for a filtered continuation", async () => {
+    const cursor = "opaque:filtered:AZ_+/=";
+    mocks.searchParams = new URLSearchParams("q=Alpha&status=ACTIVE");
+    mocks.request
+      .mockResolvedValueOnce(
+        page([row("101", "Alpha", "ACTIVE")], cursor, true),
+      )
+      .mockResolvedValueOnce(page([], null, false));
+    renderDirectory();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+    expect(mocks.request.mock.calls[1]?.[0].query).toEqual({
+      cursor,
+      limit: 50,
+      q: "Alpha",
+      status: "ACTIVE",
+    });
+  });
+
   test("loads the exact opaque cursor, appends rows, and stops at the terminal page", async () => {
     const cursor = "opaque:workspace-page:AZ_+/=";
     mocks.request
@@ -118,8 +296,8 @@ describe("Platform workspace directory", () => {
     expect(
       screen.queryByRole("button", { name: "Load more" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByText("Archived")).toBeInTheDocument();
+    expect(screen.getAllByText("Active")).toHaveLength(2);
+    expect(screen.getAllByText("Archived")).toHaveLength(2);
   });
 
   test("prevents concurrent load-more requests", async () => {
@@ -199,6 +377,7 @@ describe("Platform workspace directory", () => {
   });
 
   test("retires already-loaded rows after a continuation 403 without logout", async () => {
+    mocks.searchParams = new URLSearchParams("q=Previously");
     mocks.request
       .mockResolvedValueOnce(
         page(
@@ -222,6 +401,49 @@ describe("Platform workspace directory", () => {
     expect(screen.queryByText("Previously authorized")).not.toBeInTheDocument();
     expect(mocks.authority.refresh).toHaveBeenCalledTimes(1);
     expect(mocks.markSessionExpired).not.toHaveBeenCalled();
+  });
+
+  test("renders a filtered validation error without expiring the session", async () => {
+    mocks.searchParams = new URLSearchParams("q=Alpha");
+    mocks.request.mockRejectedValue(
+      new ApiError({
+        category: "validation",
+        code: "VALIDATION_FAILED",
+        kind: "backend",
+        message: "invalid q",
+        status: 400,
+      }),
+    );
+    renderDirectory();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "search or filter request is invalid",
+    );
+    expect(mocks.markSessionExpired).not.toHaveBeenCalled();
+    expect(mocks.authority.refresh).not.toHaveBeenCalled();
+  });
+
+  test("suppresses a late filtered response after authority identity changes", async () => {
+    mocks.searchParams = new URLSearchParams("q=Old");
+    const oldPage = deferred<unknown>();
+    mocks.request.mockReturnValueOnce(oldPage.promise);
+    const queryClient = testQueryClient();
+    const view = renderDirectory(queryClient);
+
+    mocks.authority.accessVersion = 8;
+    mocks.searchParams = new URLSearchParams("q=Current");
+    mocks.request.mockResolvedValueOnce(
+      page([row("102", "Current result", "ACTIVE")], null, false),
+    );
+    view.rerender(tree(queryClient));
+    expect(await screen.findByText("Current result")).toBeInTheDocument();
+
+    await act(async () => {
+      oldPage.resolve(page([row("101", "Old result", "ACTIVE")], null, false));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+    expect(screen.getByText("Current result")).toBeInTheDocument();
   });
 
   test("uses existing session-expiry handling for a 401", async () => {
@@ -324,11 +546,11 @@ describe("Platform workspace directory", () => {
     );
     renderDirectory(testQueryClient(), "ar");
 
-    expect(await screen.findByText("بانتظار التفعيل")).toBeInTheDocument();
-    expect(screen.getByText("نشطة")).toBeInTheDocument();
-    expect(screen.getByText("مقيدة")).toBeInTheDocument();
-    expect(screen.getByText("معلقة")).toBeInTheDocument();
-    expect(screen.getByText("مؤرشفة")).toBeInTheDocument();
+    expect(await screen.findAllByText("بانتظار التفعيل")).toHaveLength(2);
+    expect(screen.getAllByText("نشطة")).toHaveLength(2);
+    expect(screen.getAllByText("مقيدة")).toHaveLength(2);
+    expect(screen.getAllByText("معلقة")).toHaveLength(2);
+    expect(screen.getAllByText("مؤرشفة")).toHaveLength(2);
     expect(screen.queryByText("PENDING_ACTIVATION")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "مساحات العمل" }).closest("section"),
@@ -348,7 +570,18 @@ const labels = {
     restart: "Restart directory",
   },
   empty: "No workspaces are available.",
+  filteredEmpty: "No workspaces match the current search or filter.",
   loading: "Loading workspaces...",
+  search: {
+    label: "Search by workspace name",
+    placeholder: "For example, Atlas",
+    apply: "Search",
+    clear: "Clear search",
+    statusLabel: "Filter by status",
+    allStatuses: "All statuses",
+    tooLong: "Search must be no more than 64 characters.",
+    viewDetails: "View details",
+  },
   errors: {
     denied: "Workspace directory is not available.",
     forbidden: "You are no longer authorized to view workspaces.",
@@ -356,6 +589,7 @@ const labels = {
     unavailable: "Workspaces could not be loaded.",
     loadMore: "Additional workspaces could not be loaded.",
     cursor: "The directory position is no longer valid.",
+    validation: "The search or filter request is invalid.",
   },
   statuses: {
     PENDING_ACTIVATION: "Pending activation",

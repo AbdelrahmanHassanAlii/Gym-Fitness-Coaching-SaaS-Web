@@ -24,6 +24,71 @@
   padding: var(--space-2) var(--space-4);
 }
 
+.filters {
+  align-items: end;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto;
+  padding: var(--space-4);
+}
+
+.control {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.control span {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.control input,
+.control select {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  min-height: 2.75rem;
+  padding-inline: var(--space-3);
+  width: 100%;
+}
+
+.control input:focus-visible,
+.control select:focus-visible,
+.workspaceLink:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.filterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filters .error {
+  grid-column: 1 / -1;
+}
+
+.workspaceLink {
+  color: var(--color-primary);
+  font-weight: 700;
+  text-underline-offset: 0.18em;
+}
+
+.visuallyHidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .directory button:focus-visible {
   outline: 3px solid var(--color-primary);
   outline-offset: 2px;
@@ -114,6 +179,11 @@
 }
 
 @media (max-width: 40rem) {
+  .filters {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
   .tableFrame {
     border: 0;
     overflow: visible;
