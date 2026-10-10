@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AuthSessionContextValue } from "@/lib/auth";
 import type { PlatformAuthority } from "@/lib/platform-access";
 import { ApiError } from "@/lib/api";
@@ -34,7 +34,7 @@ vi.mock("@/lib/platform-access", async (importOriginal) => {
     await importOriginal<typeof import("@/lib/platform-access")>();
   return {
     ...original,
-    usePlatformAuthority: () => mocks.authority as PlatformAuthority,
+    usePlatformAuthority: () => mocks.authority as unknown as PlatformAuthority,
   };
 });
 
@@ -54,6 +54,10 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 describe("Platform workspace directory", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     mocks.request.mockReset();
     mocks.markSessionExpired.mockReset();
@@ -92,7 +96,7 @@ describe("Platform workspace directory", () => {
   });
 
   test("loads the exact opaque cursor, appends rows, and stops at the terminal page", async () => {
-    const cursor = "68e7a9d10d56fd2b98d4a100";
+    const cursor = "opaque:workspace-page:AZ_+/=";
     mocks.request
       .mockResolvedValueOnce(
         page([row("101", "Alpha", "ACTIVE")], cursor, true),
@@ -194,15 +198,28 @@ describe("Platform workspace directory", () => {
     expect(mocks.request.mock.calls[2]?.[0].query).toEqual({ limit: 50 });
   });
 
-  test("retires rows on a 403 and revalidates Platform authority without logout", async () => {
-    mocks.request.mockRejectedValue(backendError("PERMISSION_DENIED", 403));
+  test("retires already-loaded rows after a continuation 403 without logout", async () => {
+    mocks.request
+      .mockResolvedValueOnce(
+        page(
+          [row("101", "Previously authorized", "ACTIVE")],
+          "opaque-next-page",
+          true,
+        ),
+      )
+      .mockRejectedValueOnce(backendError("PERMISSION_DENIED", 403));
     renderDirectory();
 
+    expect(
+      await screen.findByText("Previously authorized"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
         "no longer authorized",
       ),
     );
+    expect(screen.queryByText("Previously authorized")).not.toBeInTheDocument();
     expect(mocks.authority.refresh).toHaveBeenCalledTimes(1);
     expect(mocks.markSessionExpired).not.toHaveBeenCalled();
   });
@@ -235,25 +252,60 @@ describe("Platform workspace directory", () => {
     expect(await screen.findByText("Recovered")).toBeInTheDocument();
   });
 
-  test("a late page from an old authority identity cannot replace current data", async () => {
-    const oldPage = deferred<unknown>();
-    mocks.request.mockReturnValueOnce(oldPage.promise);
-    const queryClient = testQueryClient();
-    const view = renderDirectory(queryClient);
+  test.each([
+    ["principal", (): void => void (mocks.authority.principalId = "user-b")],
+    [
+      "auth generation",
+      (): void => void (mocks.authority.sessionGeneration = 5),
+    ],
+    [
+      "membership",
+      (): void => void (mocks.authority.membershipId = "platform-membership-b"),
+    ],
+    ["access version", (): void => void (mocks.authority.accessVersion = 8)],
+  ] as const)(
+    "late success from an old %s cannot replace current directory state",
+    async (_dimension, changeIdentity) => {
+      await proveLateAuthorityResultSafe(changeIdentity, "success");
+    },
+  );
 
-    mocks.authority.principalId = "user-b";
-    mocks.authority.sessionGeneration = 5;
-    mocks.authority.membershipId = "platform-membership-b";
-    mocks.authority.accessVersion = 8;
-    mocks.request.mockResolvedValueOnce(
-      page([row("102", "Current", "ACTIVE")], null, false),
+  test.each([
+    ["principal", (): void => void (mocks.authority.principalId = "user-b")],
+    [
+      "auth generation",
+      (): void => void (mocks.authority.sessionGeneration = 5),
+    ],
+    [
+      "membership",
+      (): void => void (mocks.authority.membershipId = "platform-membership-b"),
+    ],
+    ["access version", (): void => void (mocks.authority.accessVersion = 8)],
+  ] as const)(
+    "late error from an old %s cannot corrupt current directory state",
+    async (_dimension, changeIdentity) => {
+      await proveLateAuthorityResultSafe(changeIdentity, "error");
+    },
+  );
+
+  test("renders createdAt in explicit UTC instead of the browser timezone", async () => {
+    vi.stubEnv("TZ", "Pacific/Kiritimati");
+    mocks.request.mockResolvedValue(
+      page(
+        [
+          {
+            ...row("101", "Boundary workspace", "ACTIVE"),
+            createdAt: "2026-10-09T23:30:00.000Z",
+          },
+        ],
+        null,
+        false,
+      ),
     );
-    view.rerender(tree(queryClient));
+    renderDirectory();
 
-    expect(await screen.findByText("Current")).toBeInTheDocument();
-    oldPage.resolve(page([row("101", "Stale", "ACTIVE")], null, false));
-    await act(async () => undefined);
-    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+    const timestamp = await screen.findByText("Oct 9, 2026, 11:30 PM");
+    expect(timestamp).toHaveAttribute("datetime", "2026-10-09T23:30:00.000Z");
   });
 
   test("localizes every status and uses RTL without leaking raw enums", async () => {
@@ -375,8 +427,39 @@ function backendError(code: string, status: number) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolver, rejecter) => {
     resolve = resolver;
+    reject = rejecter;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
+}
+
+async function proveLateAuthorityResultSafe(
+  changeIdentity: () => unknown,
+  outcome: "error" | "success",
+) {
+  const oldPage = deferred<unknown>();
+  mocks.request.mockReturnValueOnce(oldPage.promise);
+  const queryClient = testQueryClient();
+  const view = renderDirectory(queryClient);
+
+  changeIdentity();
+  mocks.request.mockResolvedValueOnce(
+    page([row("102", "Current", "ACTIVE")], null, false),
+  );
+  view.rerender(tree(queryClient));
+
+  expect(await screen.findByText("Current")).toBeInTheDocument();
+  await act(async () => {
+    if (outcome === "success") {
+      oldPage.resolve(page([row("101", "Stale", "ACTIVE")], null, false));
+    } else {
+      oldPage.reject(new TypeError("late failure"));
+    }
+    await Promise.resolve();
+  });
+  expect(screen.getByText("Current")).toBeInTheDocument();
+  expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 }

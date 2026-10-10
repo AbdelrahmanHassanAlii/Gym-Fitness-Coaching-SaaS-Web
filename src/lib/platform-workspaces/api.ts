@@ -51,7 +51,7 @@ function isDirectoryPage(
 
   return value.meta.hasMore
     ? typeof value.meta.nextCursor === "string" &&
-        objectIdPattern.test(value.meta.nextCursor)
+        value.meta.nextCursor.length > 0
     : value.meta.nextCursor === null;
 }
 

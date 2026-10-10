@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import type { MembershipId, UserId } from "@/contracts";
 import type { ApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import {
@@ -44,8 +45,8 @@ describe("Platform workspace directory contract", () => {
       accessVersion: 7,
       authorityValidUntil: "2026-10-10T08:00:00.000Z",
       limit: 50,
-      membershipId: "membership-a",
-      principalId: "user-a",
+      membershipId: "membership-a" as MembershipId,
+      principalId: "user-a" as UserId,
       sessionGeneration: 4,
     } as const;
     const key = platformWorkspaceDirectoryKeys.list(identity);
@@ -63,9 +64,9 @@ describe("Platform workspace directory contract", () => {
       },
     ]);
     for (const changed of [
-      { ...identity, principalId: "user-b" },
+      { ...identity, principalId: "user-b" as UserId },
       { ...identity, sessionGeneration: 5 },
-      { ...identity, membershipId: "membership-b" },
+      { ...identity, membershipId: "membership-b" as MembershipId },
       { ...identity, accessVersion: 8 },
       { ...identity, authorityValidUntil: "2026-10-10T09:00:00.000Z" },
     ]) {
@@ -95,8 +96,8 @@ describe("Platform workspace directory contract", () => {
       { data: [workspace], meta: { hasMore: true, nextCursor: null } },
     ],
     [
-      "malformed continuation cursor",
-      { data: [workspace], meta: { hasMore: true, nextCursor: "cursor" } },
+      "empty continuation cursor",
+      { data: [workspace], meta: { hasMore: true, nextCursor: "" } },
     ],
     [
       "duplicate row",
@@ -137,6 +138,28 @@ describe("Platform workspace directory contract", () => {
     } as unknown as ApiClient;
 
     await expect(listPlatformWorkspaces(apiClient)).resolves.toEqual(response);
+  });
+
+  test("accepts and replays a non-ObjectId opaque continuation token unchanged", async () => {
+    const cursor = "opaque:workspace-page:AZ_+/=";
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [workspace],
+        meta: { hasMore: true, nextCursor: cursor },
+      })
+      .mockResolvedValueOnce(page());
+    const apiClient = { request } as unknown as ApiClient;
+
+    const firstPage = await listPlatformWorkspaces(apiClient);
+    await listPlatformWorkspaces(apiClient, firstPage.meta.nextCursor!);
+
+    expect(request).toHaveBeenNthCalledWith(2, {
+      method: "GET",
+      path: "/platform/workspaces",
+      query: { cursor, limit: platformWorkspacePageLimit },
+      signal: undefined,
+    });
   });
 });
 

@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import type {
   PlatformWorkspaceDirectoryPageDto,
   PlatformWorkspaceDirectoryRowDto,
@@ -10,14 +14,21 @@ import type {
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
-import { parseOffsetTimestamp } from "@/lib/date-time";
+import {
+  formatInstantInTimeZone,
+  parseIanaTimeZone,
+  parseOffsetTimestamp,
+} from "@/lib/date-time";
 import { usePlatformAuthority } from "@/lib/platform-access";
 import {
   listPlatformWorkspaces,
   platformWorkspaceDirectoryKeys,
   platformWorkspacePageLimit,
 } from "@/lib/platform-workspaces";
+import type { AppQueryKey } from "@/lib/server-state";
 import styles from "./platform-workspace-directory.module.css";
+
+const platformWorkspaceDirectoryTimeZone = parseIanaTimeZone("UTC");
 
 export interface PlatformWorkspaceDirectoryLabels {
   actions: {
@@ -81,6 +92,8 @@ export function PlatformWorkspaceDirectory({
   const identityToken = JSON.stringify(queryKey);
 
   useEffect(() => {
+    // Identity changes must retire a denial that belonged to the old authority.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDomainDenied(false);
     handledError.current = null;
   }, [identityToken]);
@@ -92,7 +105,13 @@ export function PlatformWorkspaceDirectory({
     [queryClient, queryKey],
   );
 
-  const directory = useInfiniteQuery({
+  const directory = useInfiniteQuery<
+    PlatformWorkspaceDirectoryPageDto,
+    unknown,
+    InfiniteData<PlatformWorkspaceDirectoryPageDto, string | undefined>,
+    AppQueryKey,
+    string | undefined
+  >({
     enabled: authorized && !domainDenied,
     getNextPageParam: (lastPage) =>
       lastPage.meta.hasMore ? lastPage.meta.nextCursor! : undefined,
@@ -112,6 +131,8 @@ export function PlatformWorkspaceDirectory({
       return;
     }
     if (isApiError(error) && error.kind === "backend" && error.status === 403) {
+      // The asynchronous domain response is the source of this local denial.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDomainDenied(true);
       void queryClient.cancelQueries({ exact: true, queryKey });
       queryClient.removeQueries({ exact: true, queryKey });
@@ -286,10 +307,11 @@ function validatePageChain(
 }
 
 function formatCreatedAt(timestamp: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(parseOffsetTimestamp(timestamp)));
+  return formatInstantInTimeZone(
+    parseOffsetTimestamp(timestamp),
+    locale,
+    platformWorkspaceDirectoryTimeZone,
+  );
 }
 
 function isCursorInvalid(error: unknown): boolean {
