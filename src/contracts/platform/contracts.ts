@@ -52,3 +52,29 @@ export interface PlatformEffectiveAccessDecisionsDto {
   validUntil: string | null;
   decisions: readonly PlatformEffectiveAccessDecisionDto[];
 }
+
+export const platformWorkspaceStatuses = [
+  "PENDING_ACTIVATION",
+  "ACTIVE",
+  "RESTRICTED",
+  "SUSPENDED",
+  "ARCHIVED",
+] as const;
+
+export type PlatformWorkspaceStatus =
+  (typeof platformWorkspaceStatuses)[number];
+
+export interface PlatformWorkspaceDirectoryRowDto {
+  id: string;
+  name: string;
+  status: PlatformWorkspaceStatus;
+  createdAt: string;
+}
+
+export interface PlatformWorkspaceDirectoryPageDto {
+  data: readonly PlatformWorkspaceDirectoryRowDto[];
+  meta: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}

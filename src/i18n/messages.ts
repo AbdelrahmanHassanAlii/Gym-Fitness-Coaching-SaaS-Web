@@ -169,7 +169,7 @@ export const messages = {
         },
         workspaces: {
           title: "مساحات العمل",
-          description: "ستتوفر الإدارة في مرحلة لاحقة",
+          description: "دليل مساحات عمل العملاء",
         },
         users: {
           title: "المستخدمون",
@@ -185,6 +185,40 @@ export const messages = {
         copy: "واجهة مستقلة وآمنة للوصول إلى أقسام إدارة المنصة التي ستُنفذ في مراحل لاحقة.",
         availableSections: "الأقسام المتاحة",
         noSections: "لا تتوفر أقسام منصة لصلاحياتك الحالية.",
+      },
+    },
+    platformWorkspaces: {
+      title: "مساحات العمل",
+      columns: {
+        name: "اسم مساحة العمل",
+        status: "الحالة",
+        createdAt: "تاريخ الإنشاء",
+      },
+      actions: {
+        loadMore: "تحميل المزيد",
+        loadingMore: "جارٍ تحميل المزيد...",
+        refresh: "تحديث",
+        retry: "إعادة المحاولة",
+        retryMore: "إعادة محاولة تحميل المزيد",
+        restart: "بدء الدليل من جديد",
+      },
+      loading: "جارٍ تحميل مساحات العمل...",
+      empty: "لا توجد مساحات عمل متاحة.",
+      errors: {
+        denied: "دليل مساحات العمل غير متاح لصلاحياتك الحالية.",
+        forbidden: "لم تعد مخولًا بعرض مساحات العمل.",
+        malformed:
+          "أعاد الخادم بيانات غير متوقعة لمساحات العمل، لذا توقفت الواجهة بأمان.",
+        unavailable: "تعذر تحميل مساحات العمل.",
+        loadMore: "تعذر تحميل مساحات عمل إضافية.",
+        cursor: "لم يعد موضع الدليل صالحًا. ابدأ من الصفحة الأولى.",
+      },
+      statuses: {
+        PENDING_ACTIVATION: "بانتظار التفعيل",
+        ACTIVE: "نشطة",
+        RESTRICTED: "مقيدة",
+        SUSPENDED: "معلقة",
+        ARCHIVED: "مؤرشفة",
       },
     },
     notifications: {
@@ -1247,7 +1281,7 @@ export const messages = {
         },
         workspaces: {
           title: "Workspaces",
-          description: "Management arrives in a later milestone",
+          description: "Customer workspace directory",
         },
         users: {
           title: "Users",
@@ -1264,6 +1298,42 @@ export const messages = {
         availableSections: "Available sections",
         noSections:
           "No Platform sections are available for your current access.",
+      },
+    },
+    platformWorkspaces: {
+      title: "Workspaces",
+      columns: {
+        name: "Workspace name",
+        status: "Status",
+        createdAt: "Created",
+      },
+      actions: {
+        loadMore: "Load more",
+        loadingMore: "Loading more...",
+        refresh: "Refresh",
+        retry: "Retry",
+        retryMore: "Retry loading more",
+        restart: "Restart directory",
+      },
+      loading: "Loading workspaces...",
+      empty: "No workspaces are available.",
+      errors: {
+        denied:
+          "The workspace directory is unavailable for your current access.",
+        forbidden: "You are no longer authorized to view workspaces.",
+        malformed:
+          "The Backend returned unexpected workspace data, so the directory failed closed.",
+        unavailable: "Workspaces could not be loaded.",
+        loadMore: "Additional workspaces could not be loaded.",
+        cursor:
+          "The directory position is no longer valid. Restart from the first page.",
+      },
+      statuses: {
+        PENDING_ACTIVATION: "Pending activation",
+        ACTIVE: "Active",
+        RESTRICTED: "Restricted",
+        SUSPENDED: "Suspended",
+        ARCHIVED: "Archived",
       },
     },
     notifications: {

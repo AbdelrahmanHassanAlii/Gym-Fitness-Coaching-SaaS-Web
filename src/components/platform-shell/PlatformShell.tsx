@@ -14,6 +14,7 @@ import { useAuthSession } from "@/lib/auth";
 import { isApiError } from "@/lib/api";
 import {
   isPlatformAccessVersionConflict,
+  PlatformAuthorityProvider,
   platformAccessKeys,
   platformDecisionRequests,
   requestPlatformContext,
@@ -276,6 +277,32 @@ export function PlatformShell({
       ? `${state.user.firstName} ${state.user.lastName}`.trim()
       : "";
   const direction = getLocaleDirection(locale);
+  const refreshAuthority = async () => {
+    setRecovering(true);
+    try {
+      const refreshedContext = await refetchContext();
+      if (
+        refreshedContext.data?.membership.status === "ACTIVE" &&
+        refreshedContext.data.membership.id === activeMembership!.id &&
+        refreshedContext.data.membership.accessVersion ===
+          activeMembership!.accessVersion
+      ) {
+        await refetchDecisions();
+      }
+    } finally {
+      setRecovering(false);
+    }
+  };
+  const authority = {
+    accessVersion: activeMembership!.accessVersion,
+    allows: (permission: PlatformFoundationPermission) =>
+      allowedPermissions.has(permission),
+    membershipId: activeMembership!.id,
+    principalId: principalId!,
+    refresh: refreshAuthority,
+    sessionGeneration: generation,
+    validUntil: decisionsQuery.data!.validUntil,
+  };
 
   return (
     <div className={styles.shell} dir={direction}>
@@ -306,7 +333,20 @@ export function PlatformShell({
             <span>{labels.nav.home.title}</span>
             <small>{labels.nav.home.description}</small>
           </Link>
-          {(["workspaces", "users", "operations"] as const).map((item) =>
+          {allowedPermissions.has(navigationPermissions.workspaces) ? (
+            <Link
+              aria-current={
+                pathname === "/platform/workspaces" ? "page" : undefined
+              }
+              className={styles.navLink}
+              href="/platform/workspaces"
+              onClick={() => setMenuOpen(false)}
+            >
+              <span>{labels.nav.workspaces.title}</span>
+              <small>{labels.nav.workspaces.description}</small>
+            </Link>
+          ) : null}
+          {(["users", "operations"] as const).map((item) =>
             allowedPermissions.has(navigationPermissions[item]) ? (
               <span className={styles.navPlaceholder} key={item}>
                 <span>{labels.nav[item].title}</span>
@@ -330,7 +370,9 @@ export function PlatformShell({
           </div>
         </header>
         <main className={styles.content}>
-          {children}
+          <PlatformAuthorityProvider authority={authority}>
+            {children}
+          </PlatformAuthorityProvider>
           {accessState === "DENIED" ? (
             <p className={styles.noSections} role="status">
               {labels.home.noSections}

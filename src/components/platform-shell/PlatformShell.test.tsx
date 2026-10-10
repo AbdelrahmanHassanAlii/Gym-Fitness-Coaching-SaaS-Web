@@ -11,6 +11,7 @@ import { messages } from "@/i18n/messages";
 import {
   platformAccessKeys,
   platformDecisionRequests,
+  usePlatformAuthority,
 } from "@/lib/platform-access";
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { PlatformShell } from "./PlatformShell";
@@ -62,6 +63,7 @@ describe("Platform shell", () => {
     mocks.authSession.markSessionExpired.mockReset();
     mocks.authSession.generation = 4;
     mocks.authSession.state = authenticatedState();
+    mocks.pathname = "/platform";
   });
 
   afterEach(() => {
@@ -83,7 +85,10 @@ describe("Platform shell", () => {
       "aria-current",
       "page",
     );
-    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Workspaces/ })).toHaveAttribute(
+      "href",
+      "/platform/workspaces",
+    );
     expect(screen.getByText("Operations")).toBeInTheDocument();
     expect(screen.queryByText("Users")).not.toBeInTheDocument();
     expect(mocks.authSession.apiClient.request).toHaveBeenNthCalledWith(1, {
@@ -105,6 +110,33 @@ describe("Platform shell", () => {
       signal: expect.any(AbortSignal),
     });
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(2);
+  });
+
+  test("marks only the workspace route current and exposes its resolved authority identity", async () => {
+    mocks.pathname = "/platform/workspaces";
+    mockActiveContext(7);
+    mockDecisions(
+      {
+        "audit.platform.read": false,
+        "platform_users.read": false,
+        "platform_workspaces.manage": true,
+      },
+      7,
+      "2030-10-10T08:00:00.000Z",
+    );
+
+    renderShell(testQueryClient(), <AuthorityProbe />);
+
+    expect(await screen.findByTestId("authority")).toHaveTextContent(
+      "user_a|4|platform_membership_a|7|2030-10-10T08:00:00.000Z|true",
+    );
+    expect(screen.getByRole("link", { name: /Workspaces/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("link", { name: /Home/ })).not.toHaveAttribute(
+      "aria-current",
+    );
   });
 
   test.each([
@@ -317,9 +349,12 @@ describe("Platform shell", () => {
       "platform_workspaces.manage": false,
     });
 
-    renderShell();
+    renderShell(testQueryClient(), <WorkspaceAuthorityProbe />);
 
     expect(await screen.findByText("Workspaces")).toBeInTheDocument();
+    expect(
+      screen.getByText("Authorized workspace content"),
+    ).toBeInTheDocument();
 
     await timer.advanceBy(59_999);
     expect(screen.getByText("Workspaces")).toBeInTheDocument();
@@ -328,6 +363,9 @@ describe("Platform shell", () => {
     await timer.advanceBy(1);
     await settleAsyncQueries();
     expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Authorized workspace content"),
+    ).not.toBeInTheDocument();
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(3);
     expect(
       screen.getByText("No Platform sections are available."),
@@ -597,20 +635,49 @@ const labels = {
   },
 };
 
-function renderShell(queryClient = testQueryClient()) {
-  return render(shellTree(queryClient));
+function renderShell(
+  queryClient = testQueryClient(),
+  children = <h1>Platform foundation</h1>,
+) {
+  return render(shellTree(queryClient, children));
 }
 
-function shellTree(queryClient: QueryClient) {
+function shellTree(
+  queryClient: QueryClient,
+  children = <h1>Platform foundation</h1>,
+) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <PlatformShell labels={labels} locale="en">
-          <h1>Platform foundation</h1>
+          {children}
         </PlatformShell>
       </QueryClientProvider>
     </ThemeProvider>
   );
+}
+
+function AuthorityProbe() {
+  const authority = usePlatformAuthority();
+  return (
+    <p data-testid="authority">
+      {[
+        authority.principalId,
+        authority.sessionGeneration,
+        authority.membershipId,
+        authority.accessVersion,
+        authority.validUntil,
+        authority.allows("platform_workspaces.manage"),
+      ].join("|")}
+    </p>
+  );
+}
+
+function WorkspaceAuthorityProbe() {
+  const authority = usePlatformAuthority();
+  return authority.allows("platform_workspaces.manage") ? (
+    <p>Authorized workspace content</p>
+  ) : null;
 }
 
 function testQueryClient() {
