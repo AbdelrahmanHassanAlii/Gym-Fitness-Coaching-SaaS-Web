@@ -11,6 +11,7 @@ export const platformFoundationPermissions = [
   "audit.platform.read",
   "platform_users.read",
   "platform_workspaces.manage",
+  "subscriptions.read",
 ] as const;
 
 export type PlatformMembershipStatus =

@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   PlatformWorkspaceStatus,
@@ -26,6 +33,11 @@ import {
 import styles from "./platform-workspace-detail.module.css";
 import { PlatformWorkspaceManagement } from "./PlatformWorkspaceManagement";
 import type { PlatformWorkspaceManagementLabels } from "./PlatformWorkspaceCreate";
+
+import {
+  PlatformWorkspaceSummaries,
+  type PlatformWorkspaceSummaryLabels,
+} from "./PlatformWorkspaceSummaries";
 
 const objectIdPattern = /^[0-9a-f]{24}$/;
 const utc = parseIanaTimeZone("UTC");
@@ -68,11 +80,13 @@ export function PlatformWorkspaceDetail({
   locale,
   workspaceId,
   managementLabels,
+  summaryLabels,
 }: {
   labels: PlatformWorkspaceDetailLabels;
   locale: Locale;
   workspaceId: string;
   managementLabels?: PlatformWorkspaceManagementLabels;
+  summaryLabels?: PlatformWorkspaceSummaryLabels;
 }) {
   const authority = usePlatformAuthority();
   const { apiClient, markSessionExpired } = useAuthSession();
@@ -105,6 +119,14 @@ export function PlatformWorkspaceDetail({
     [identity],
   );
   const identityToken = JSON.stringify(queryKey);
+  const [missingSummaryIdentity, setMissingSummaryIdentity] = useState<
+    string | null
+  >(null);
+  const handleSummaryNotFound = useCallback(() => {
+    setMissingSummaryIdentity(identityToken);
+    void queryClient.cancelQueries({ exact: true, queryKey });
+    queryClient.removeQueries({ exact: true, queryKey });
+  }, [identityToken, queryClient, queryKey]);
 
   useEffect(() => {
     // Identity changes retire a denial associated with the previous authority.
@@ -121,7 +143,11 @@ export function PlatformWorkspaceDetail({
   );
 
   const detail = useQuery({
-    enabled: authorized && validWorkspaceId && !domainDenied,
+    enabled:
+      authorized &&
+      validWorkspaceId &&
+      !domainDenied &&
+      missingSummaryIdentity !== identityToken,
     queryFn: ({ signal }) =>
       getPlatformWorkspace(apiClient, workspaceId as WorkspaceId, signal),
     queryKey,
@@ -151,7 +177,11 @@ export function PlatformWorkspaceDetail({
     return <State labels={labels} message={labels.errors.denied} />;
   if (domainDenied)
     return <State labels={labels} message={labels.errors.forbidden} />;
-  if (!validWorkspaceId || isNotFound(detail.error)) {
+  if (
+    !validWorkspaceId ||
+    isNotFound(detail.error) ||
+    missingSummaryIdentity === identityToken
+  ) {
     return (
       <State
         backHref={backHref}
@@ -239,6 +269,15 @@ export function PlatformWorkspaceDetail({
           </dd>
         </div>
       </DetailSection>
+      {summaryLabels ? (
+        <PlatformWorkspaceSummaries
+          key={identityToken}
+          labels={summaryLabels}
+          locale={locale}
+          workspaceId={workspaceId}
+          onNotFound={handleSummaryNotFound}
+        />
+      ) : null}
       {managementLabels ? (
         <PlatformWorkspaceManagement
           labels={managementLabels}

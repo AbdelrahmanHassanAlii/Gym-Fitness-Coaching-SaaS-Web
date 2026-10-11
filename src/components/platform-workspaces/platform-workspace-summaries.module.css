@@ -1,0 +1,62 @@
+.cards {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.card {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow-wrap: anywhere;
+}
+.card h2,
+.card p {
+  margin: 0;
+}
+.facts,
+.metrics {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  margin: 0;
+}
+.fact {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+.fact dt,
+.note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.fact dd {
+  margin: 0;
+}
+.metrics dd {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+.badge {
+  justify-self: start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+}
+.card button {
+  background: var(--color-input);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-4);
+  margin-block-start: var(--space-3);
+}
+.card button:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}

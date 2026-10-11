@@ -24,6 +24,7 @@ import {
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { PlatformWorkspaceDetail } from "@/components/platform-workspaces/PlatformWorkspaceDetail";
 import { PlatformWorkspaceManagement } from "@/components/platform-workspaces/PlatformWorkspaceManagement";
+import { PlatformWorkspaceSummaries } from "@/components/platform-workspaces/PlatformWorkspaceSummaries";
 import { PlatformShell } from "./PlatformShell";
 
 const workspaceId = "68e7a9d10d56fd2b98d4a101";
@@ -84,6 +85,161 @@ describe("Platform shell", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  test("detail decisions include commercial permission without adding it to navigation requests", async () => {
+    mocks.pathname = `/platform/workspaces/${workspaceId}`;
+    mocks.authSession.apiClient.request.mockImplementation(
+      (r: {
+        path: string;
+        body?: { requests: readonly { permission: string }[] };
+      }) => {
+        if (r.path === "/me/platform-context")
+          return Promise.resolve(contextEnvelope("ACTIVE", 7));
+        if (r.path === "/platform/me/effective-access/decisions") {
+          expect(r.body?.requests.map((v) => v.permission)).toContain(
+            "subscriptions.read",
+          );
+          return Promise.resolve(
+            decisionEnvelope({
+              "audit.platform.read": false,
+              "platform_users.read": false,
+              "platform_workspaces.manage": true,
+              "subscriptions.read": false,
+            }),
+          );
+        }
+        if (r.path.endsWith("/counts"))
+          return Promise.resolve({
+            data: {
+              workspaceId,
+              counts: {
+                branches: { active: 0 },
+                trainees: { active: 0, needsReassignment: 0 },
+                staff: { activeIncludingOwners: 0 },
+              },
+            },
+          });
+        throw new Error(`Unexpected commercial fetch: ${r.path}`);
+      },
+    );
+    renderShell(
+      testQueryClient(),
+      <PlatformWorkspaceSummaries
+        labels={messages.en.platformWorkspaceSummaries}
+        locale="en"
+        workspaceId={workspaceId}
+        onNotFound={vi.fn()}
+      />,
+    );
+    await screen.findAllByText("0");
+    expect(screen.getByText("Restricted")).toBeInTheDocument();
+    expect(
+      mocks.authSession.apiClient.request.mock.calls.some(([r]) =>
+        r.path.endsWith("/subscription-summary"),
+      ),
+    ).toBe(false);
+  });
+
+  test("actual shell validUntil retires both summaries and rejects both late responses", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mocks.pathname = `/platform/workspaces/${workspaceId}`;
+    const lateSubscription = deferred<unknown>(),
+      lateCounts = deferred<unknown>();
+    let decisions = 0,
+      subscriptionReads = 0,
+      countReads = 0;
+    mocks.authSession.apiClient.request.mockImplementation(
+      (r: { path: string }) => {
+        if (r.path === "/me/platform-context")
+          return Promise.resolve(contextEnvelope("ACTIVE", 7));
+        if (r.path === "/platform/me/effective-access/decisions") {
+          decisions++;
+          return Promise.resolve(
+            decisionEnvelope(
+              {
+                "audit.platform.read": false,
+                "platform_users.read": false,
+                "platform_workspaces.manage": decisions === 1,
+                "subscriptions.read": decisions === 1,
+              },
+              7,
+              decisions === 1 ? "2026-10-09T08:01:00.000Z" : null,
+            ),
+          );
+        }
+        if (r.path.endsWith("/subscription-summary")) {
+          subscriptionReads++;
+          return subscriptionReads === 1
+            ? Promise.resolve({ data: { workspaceId, subscription: null } })
+            : lateSubscription.promise;
+        }
+        if (r.path.endsWith("/counts")) {
+          countReads++;
+          return countReads === 1
+            ? Promise.resolve({
+                data: {
+                  workspaceId,
+                  counts: {
+                    branches: { active: 2 },
+                    trainees: { active: 3, needsReassignment: 1 },
+                    staff: { activeIncludingOwners: 4 },
+                  },
+                },
+              })
+            : lateCounts.promise;
+        }
+        throw new Error(`Unexpected request: ${r.path}`);
+      },
+    );
+    const c = testQueryClient();
+    renderShell(
+      c,
+      <PlatformWorkspaceSummaries
+        labels={messages.en.platformWorkspaceSummaries}
+        locale="en"
+        workspaceId={workspaceId}
+        onNotFound={vi.fn()}
+      />,
+    );
+    await screen.findByText("No subscription");
+    await screen.findByText("3");
+    void c.refetchQueries({
+      predicate: (q) =>
+        q.queryKey.includes("subscription-summary") ||
+        q.queryKey.includes("counts"),
+    });
+    await waitFor(() => expect(subscriptionReads + countReads).toBe(4));
+    await timer.advanceBy(60_000);
+    await settleAsyncQueries();
+    expect(screen.queryByText("No subscription")).not.toBeInTheDocument();
+    expect(screen.queryByText("3")).not.toBeInTheDocument();
+    await act(async () => {
+      lateSubscription.resolve({ data: { workspaceId, subscription: null } });
+      lateCounts.resolve({
+        data: {
+          workspaceId,
+          counts: {
+            branches: { active: 777 },
+            trainees: { active: 777, needsReassignment: 777 },
+            staff: { activeIncludingOwners: 777 },
+          },
+        },
+      });
+    });
+    await settleAsyncQueries();
+    expect(screen.queryByText("No subscription")).not.toBeInTheDocument();
+    expect(screen.queryByText("777")).not.toBeInTheDocument();
+    expect(
+      c
+        .getQueriesData({
+          predicate: (q) =>
+            JSON.stringify(q.queryKey).includes("2026-10-09T08:01:00.000Z"),
+        })
+        .every(([, data]) => data === undefined),
+    ).toBe(true);
+    expect(mocks.authSession.markSessionExpired).not.toHaveBeenCalled();
+    expect(mocks.authSession.logout).not.toHaveBeenCalled();
   });
 
   test("loads the exact Platform contracts and shows only allowed navigation placeholders", async () => {
@@ -946,7 +1102,7 @@ function mockDecisions(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  >,
+  > & { "subscriptions.read"?: boolean },
   accessVersion = 7,
   validUntil: string | null = null,
 ) {
@@ -961,7 +1117,7 @@ function decisionEnvelope(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  >,
+  > & { "subscriptions.read"?: boolean },
   accessVersion = 7,
   validUntil: string | null = null,
   membershipId = "platform_membership_a",
@@ -971,7 +1127,12 @@ function decisionEnvelope(
       accessContext: "USER",
       accessVersion,
       context: "PLATFORM",
-      decisions: Object.entries(access)
+      decisions: Object.entries({
+        ...(/^\/platform\/workspaces\/[0-9a-f]{24}$/.test(mocks.pathname)
+          ? { "subscriptions.read": false }
+          : {}),
+        ...access,
+      })
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([permission, allowed]) => ({
           allowed,

@@ -17,6 +17,7 @@ import {
   PlatformAuthorityProvider,
   platformAccessKeys,
   platformDecisionRequests,
+  platformWorkspaceDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
@@ -86,6 +87,11 @@ export function PlatformShell({
 }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
+  const decisionRequests = /^\/platform\/workspaces\/[0-9a-f]{24}$/.test(
+    pathname,
+  )
+    ? platformWorkspaceDecisionRequests
+    : platformDecisionRequests;
   const { apiClient, generation, logout, markSessionExpired, state } =
     useAuthSession();
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -125,11 +131,11 @@ export function PlatformShell({
             membershipId: activeMembership.id,
             membershipStatus: "ACTIVE",
             principalId,
-            requests: platformDecisionRequests,
+            requests: decisionRequests,
             sessionGeneration: generation,
           })
         : null,
-    [activeMembership, generation, principalId],
+    [activeMembership, generation, principalId, decisionRequests],
   );
   const decisionsQuery = useQuery({
     enabled:
@@ -144,7 +150,7 @@ export function PlatformShell({
           accessVersion: activeMembership!.accessVersion,
           membershipId: activeMembership!.id,
         },
-        platformDecisionRequests,
+        decisionRequests,
         signal,
       ),
     queryKey: decisionKey ?? [...platformAccessKeys.all, "decisions-disabled"],

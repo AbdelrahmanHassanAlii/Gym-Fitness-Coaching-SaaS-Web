@@ -35,6 +35,17 @@ export const platformWorkspaceDirectoryKeys = {
     createQueryKey("platform-workspaces", "detail", identity),
   management: (identity: PlatformWorkspaceDetailIdentity): AppQueryKey =>
     createQueryKey("platform-workspaces", "management-state", identity),
+  summary: (
+    identity: PlatformWorkspaceDetailIdentity,
+    kind: "subscription-summary" | "counts",
+    permission: string,
+    allowed: boolean,
+  ): AppQueryKey =>
+    createQueryKey("platform-workspaces", kind, {
+      ...identity,
+      permission,
+      allowed,
+    }),
   ownerCandidates: (identity: PlatformOwnerCandidatesIdentity): AppQueryKey =>
     createQueryKey("platform-workspaces", "owner-candidates", identity),
 };
