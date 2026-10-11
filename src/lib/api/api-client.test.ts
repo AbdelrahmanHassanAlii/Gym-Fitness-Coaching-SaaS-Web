@@ -12,6 +12,29 @@ type FetchCall = {
 const baseUrl = "https://api.example.test";
 
 describe("API transport foundation", () => {
+  test("binds the default native fetch receiver for authenticated browser requests", async () => {
+    const nativeLikeFetch = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", nativeLikeFetch);
+    try {
+      const client = createApiClient({
+        baseUrl,
+        accessTokenProvider: () => "test-token",
+      });
+      expect(
+        await client.request({ path: "/platform/users", method: "GET" }),
+      ).toEqual({ data: [] });
+      expect(nativeLikeFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   test("composes configured backend origin, API prefix, relative path, and sorted query", () => {
     const url = composeApiUrl(baseUrl, "/workspaces", {
       active: true,

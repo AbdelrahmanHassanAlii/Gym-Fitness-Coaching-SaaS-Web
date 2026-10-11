@@ -32,7 +32,7 @@ class FetchApiClient implements ApiClient {
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl;
-    this.fetchImpl = options.fetch ?? fetch;
+    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.accessTokenProvider = options.accessTokenProvider;
     this.credentials = options.credentials;
     this.refresh = options.refresh ?? false;

@@ -14,7 +14,12 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "bun run start:test",
+    command: "bun run build && bun run start:test",
+    env: {
+      NEXT_PUBLIC_BACKEND_API_BASE_URL:
+        process.env.NEXT_PUBLIC_BACKEND_API_BASE_URL ??
+        "http://127.0.0.1:4901/api/v1",
+    },
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

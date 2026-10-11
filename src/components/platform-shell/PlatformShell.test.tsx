@@ -25,6 +25,8 @@ import { ThemeProvider } from "@/theme/ThemeProvider";
 import { PlatformWorkspaceDetail } from "@/components/platform-workspaces/PlatformWorkspaceDetail";
 import { PlatformWorkspaceManagement } from "@/components/platform-workspaces/PlatformWorkspaceManagement";
 import { PlatformWorkspaceSummaries } from "@/components/platform-workspaces/PlatformWorkspaceSummaries";
+import { PlatformUserDirectory } from "@/components/platform-users/PlatformUserDirectory";
+import { PlatformUserDetail } from "@/components/platform-users/PlatformUserDetail";
 import { PlatformShell } from "./PlatformShell";
 
 const workspaceId = "68e7a9d10d56fd2b98d4a101";
@@ -72,6 +74,104 @@ vi.mock("next/navigation", () => ({
 const maxSafeTimerDelay = 2_147_483_647;
 
 describe("Platform shell", () => {
+  test.each(["directory", "detail"] as const)(
+    "actual shell validUntil retires Users %s and suppresses late results",
+    async (kind) => {
+      const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+      mocks.pathname =
+        kind === "directory"
+          ? "/platform/users"
+          : `/platform/users/${workspaceId}`;
+      const late = deferred<unknown>();
+      let decisions = 0,
+        reads = 0;
+      const at = "2026-10-09T08:00:00.000Z";
+      const account = {
+        id: workspaceId,
+        displayName: "Protected member",
+        status: "ACTIVE",
+        createdAt: at,
+        platformMembership: { status: "ACTIVE" },
+      };
+      const envelope =
+        kind === "directory"
+          ? { data: [account], meta: { hasMore: false, nextCursor: null } }
+          : {
+              data: {
+                ...account,
+                updatedAt: at,
+                platformMembership: {
+                  id: workspaceId,
+                  status: "ACTIVE",
+                  createdAt: at,
+                  updatedAt: at,
+                },
+              },
+            };
+      mocks.authSession.apiClient.request.mockImplementation(
+        (r: { path: string }) => {
+          if (r.path === "/me/platform-context")
+            return Promise.resolve(contextEnvelope("ACTIVE", 7));
+          if (r.path === "/platform/me/effective-access/decisions") {
+            decisions++;
+            return Promise.resolve(
+              decisionEnvelope(
+                {
+                  "audit.platform.read": false,
+                  "platform_users.read": decisions === 1,
+                  "platform_workspaces.manage": false,
+                },
+                7,
+                decisions === 1 ? "2026-10-09T08:01:00.000Z" : null,
+              ),
+            );
+          }
+          if (r.path.startsWith("/platform/users")) {
+            reads++;
+            return reads === 1 ? Promise.resolve(envelope) : late.promise;
+          }
+          throw new Error(`Unexpected Users request: ${r.path}`);
+        },
+      );
+      const c = testQueryClient();
+      renderShell(
+        c,
+        kind === "directory" ? (
+          <PlatformUserDirectory
+            labels={messages.en.platformUsers}
+            locale="en"
+          />
+        ) : (
+          <PlatformUserDetail
+            labels={messages.en.platformUsers}
+            locale="en"
+            userId={workspaceId}
+          />
+        ),
+      );
+      await screen.findByText("Protected member");
+      void c.refetchQueries({
+        predicate: (q) => q.queryKey.includes("platform-users"),
+      });
+      await waitFor(() => expect(reads).toBe(2));
+      await timer.advanceBy(60_000);
+      await settleAsyncQueries();
+      expect(screen.queryByText("Protected member")).not.toBeInTheDocument();
+      await act(async () => late.resolve(envelope));
+      await settleAsyncQueries();
+      expect(screen.queryByText("Protected member")).not.toBeInTheDocument();
+      expect(
+        c
+          .getQueriesData({
+            predicate: (q) => q.queryKey.includes("platform-users"),
+          })
+          .every(([, data]) => data === undefined),
+      ).toBe(true);
+      expect(mocks.authSession.logout).not.toHaveBeenCalled();
+      expect(mocks.authSession.markSessionExpired).not.toHaveBeenCalled();
+    },
+  );
+
   beforeEach(() => {
     mocks.authSession.apiClient.request.mockReset();
     mocks.authSession.logout.mockReset();

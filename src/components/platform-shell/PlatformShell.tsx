@@ -355,7 +355,19 @@ export function PlatformShell({
               <small>{labels.nav.workspaces.description}</small>
             </Link>
           ) : null}
-          {(["users", "operations"] as const).map((item) =>
+          {allowedPermissions.has("platform_users.read") ? (
+            <Link
+              aria-current={
+                pathname.startsWith("/platform/users") ? "page" : undefined
+              }
+              href="/platform/users"
+              onClick={() => setMenuOpen(false)}
+            >
+              <span>{labels.nav.users.title}</span>
+              <small>{labels.nav.users.description}</small>
+            </Link>
+          ) : null}
+          {(["operations"] as const).map((item) =>
             allowedPermissions.has(navigationPermissions[item]) ? (
               <span className={styles.navPlaceholder} key={item}>
                 <span>{labels.nav[item].title}</span>
