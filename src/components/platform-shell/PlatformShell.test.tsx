@@ -2,7 +2,13 @@
  * @vitest-environment jsdom
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { MembershipId, UserId } from "@/contracts";
 import type { AuthSessionContextValue, AuthState } from "@/lib/auth";
@@ -14,8 +20,11 @@ import {
   usePlatformAuthority,
 } from "@/lib/platform-access";
 import { ThemeProvider } from "@/theme/ThemeProvider";
+import { PlatformWorkspaceDetail } from "@/components/platform-workspaces/PlatformWorkspaceDetail";
+import { PlatformWorkspaceManagement } from "@/components/platform-workspaces/PlatformWorkspaceManagement";
 import { PlatformShell } from "./PlatformShell";
 
+const workspaceId = "68e7a9d10d56fd2b98d4a101";
 const mocks = vi.hoisted(() => ({
   authSession: {
     apiClient: { request: vi.fn() },
@@ -43,6 +52,7 @@ const mocks = vi.hoisted(() => ({
   },
   pathname: "/platform",
   refresh: vi.fn(),
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -52,6 +62,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ refresh: mocks.refresh }),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 const maxSafeTimerDelay = 2_147_483_647;
@@ -64,6 +75,7 @@ describe("Platform shell", () => {
     mocks.authSession.generation = 4;
     mocks.authSession.state = authenticatedState();
     mocks.pathname = "/platform";
+    mocks.searchParams = new URLSearchParams();
   });
 
   afterEach(() => {
@@ -370,6 +382,174 @@ describe("Platform shell", () => {
     expect(
       screen.getByText("No Platform sections are available."),
     ).toHaveAttribute("role", "status");
+  });
+
+  test("activates the safe workspace-directory return after a management-state 404", async () => {
+    mocks.pathname = `/platform/workspaces/${workspaceId}`;
+    mocks.searchParams = new URLSearchParams("q=Alpha&status=ACTIVE");
+    let decisions = 0;
+    mocks.authSession.apiClient.request.mockImplementation(
+      (request: { path: string }) => {
+        if (request.path === "/me/platform-context")
+          return Promise.resolve(contextEnvelope("ACTIVE", 7));
+        if (request.path === "/platform/me/effective-access/decisions") {
+          decisions += 1;
+          return Promise.resolve(
+            decisionEnvelope({
+              "audit.platform.read": false,
+              "platform_users.read": false,
+              "platform_workspaces.manage": true,
+            }),
+          );
+        }
+        if (request.path.endsWith("/management-state"))
+          return Promise.reject(
+            new ApiError({
+              category: "not-found",
+              code: "WORKSPACE_NOT_FOUND",
+              kind: "backend",
+              message: "missing",
+              status: 404,
+            }),
+          );
+        return Promise.resolve(workspaceDetail());
+      },
+    );
+
+    renderShell(
+      testQueryClient(),
+      <PlatformWorkspaceDetail
+        labels={{
+          ...messages.en.platformWorkspaceDetail,
+          statuses: messages.en.platformWorkspaces.statuses,
+        }}
+        locale="en"
+        managementLabels={messages.en.platformWorkspaceManagement}
+        workspaceId={workspaceId}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Alpha" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      messages.en.platformWorkspaceManagement.errors.notFound,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Change owner" }),
+    ).not.toBeInTheDocument();
+    const back = screen.getByRole("link", { name: "Back to workspaces" });
+    expect(back).toHaveAttribute(
+      "href",
+      "/platform/workspaces?q=Alpha&status=ACTIVE",
+    );
+    const navigatedTo = vi.fn();
+    back.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        navigatedTo(
+          (event.currentTarget as HTMLAnchorElement).getAttribute("href"),
+        );
+      },
+      { once: true },
+    );
+    fireEvent.click(back);
+    expect(navigatedTo).toHaveBeenCalledWith(
+      "/platform/workspaces?q=Alpha&status=ACTIVE",
+    );
+    expect(decisions).toBe(1);
+    expect(mocks.authSession.markSessionExpired).not.toHaveBeenCalled();
+  });
+
+  test("unmounts management at actual validUntil and suppresses a late owner result", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    const ownerMutation = deferred<unknown>();
+    let decisions = 0;
+    let managementReads = 0;
+    mocks.authSession.apiClient.request.mockImplementation(
+      (request: { method: string; path: string }) => {
+        if (request.path === "/me/platform-context")
+          return Promise.resolve(contextEnvelope("ACTIVE", 7));
+        if (request.path === "/platform/me/effective-access/decisions") {
+          decisions += 1;
+          return Promise.resolve(
+            decisionEnvelope(
+              {
+                "audit.platform.read": false,
+                "platform_users.read": false,
+                "platform_workspaces.manage": decisions === 1,
+              },
+              7,
+              decisions === 1 ? "2026-10-09T08:01:00.000Z" : null,
+            ),
+          );
+        }
+        if (request.path.endsWith("/management-state")) {
+          managementReads += 1;
+          return Promise.resolve(workspaceManagementState());
+        }
+        if (request.path === "/platform/workspace-owner-candidates")
+          return Promise.resolve(ownerCandidates());
+        if (request.method === "POST" && request.path.endsWith("/owner"))
+          return ownerMutation.promise;
+        throw new Error(
+          `Unexpected request: ${request.method} ${request.path}`,
+        );
+      },
+    );
+    const queryClient = testQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    renderShell(
+      queryClient,
+      <PlatformWorkspaceManagement
+        labels={messages.en.platformWorkspaceManagement}
+        workspaceId={workspaceId}
+      />,
+    );
+
+    expect(await screen.findByText(/owner@example\.com/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Change owner" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New Owner.*Select/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() =>
+      expect(
+        mocks.authSession.apiClient.request.mock.calls.some(
+          ([request]) =>
+            request.method === "POST" && request.path.endsWith("/owner"),
+        ),
+      ).toBe(true),
+    );
+
+    await timer.advanceBy(60_000);
+    await settleAsyncQueries();
+    expect(screen.queryByText(/owner@example\.com/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Change owner" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Owner")).not.toBeInTheDocument();
+
+    const readsAtExpiry = managementReads;
+    invalidate.mockClear();
+    await act(async () =>
+      ownerMutation.resolve({
+        data: { workspace: workspaceManagementState().data.workspace },
+      }),
+    );
+    await settleAsyncQueries();
+
+    expect(managementReads).toBe(readsAtExpiry);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(
+        messages.en.platformWorkspaceManagement.success.ownerChanged,
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/owner@example\.com/)).not.toBeInTheDocument();
   });
 
   test("keeps far-future authority through capped timer segments until the actual deadline", async () => {
@@ -781,6 +961,53 @@ function decisionEnvelope(
       membershipStatus: "ACTIVE",
       validUntil,
     },
+  };
+}
+
+function workspaceDetail() {
+  return {
+    id: workspaceId,
+    name: "Alpha",
+    type: "GYM",
+    status: "ACTIVE",
+    timezone: "Africa/Cairo",
+    defaultLanguage: "en",
+    createdAt: "2026-10-09T23:30:00.000Z",
+  };
+}
+
+function workspaceManagementState() {
+  return {
+    data: {
+      workspace: {
+        id: workspaceId,
+        name: "Alpha",
+        type: "GYM",
+        status: "ACTIVE",
+        timezone: "Africa/Cairo",
+        defaultLanguage: "en",
+        createdAt: "2026-10-09T23:30:00.000Z",
+        version: 3,
+      },
+      owner: {
+        id: "68e7a9d10d56fd2b98d4a199",
+        displayName: "Owner",
+        email: "owner@example.com",
+      },
+    },
+  };
+}
+
+function ownerCandidates() {
+  return {
+    data: [
+      {
+        id: "68e7a9d10d56fd2b98d4a188",
+        displayName: "New Owner",
+        email: "new-owner@example.com",
+      },
+    ],
+    meta: { hasMore: false, nextCursor: null },
   };
 }
 

@@ -311,17 +311,16 @@ describe("Platform workspace management", () => {
     const trigger = await screen.findByRole("button", { name: "Archive" });
     fireEvent.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Archive" });
-    await waitFor(() =>
-      expect(dialog).toContainElement(document.activeElement as HTMLElement),
-    );
+    const heading = screen.getByRole("heading", { name: "Archive" });
+    await waitFor(() => expect(heading).toHaveFocus());
 
     const confirm = screen.getByRole("button", { name: "Confirm" });
     const cancel = screen.getByRole("button", { name: "Cancel" });
-    cancel.focus();
-    fireEvent.keyDown(document, { key: "Tab" });
-    expect(confirm).toHaveFocus();
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(cancel).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(confirm).toHaveFocus();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

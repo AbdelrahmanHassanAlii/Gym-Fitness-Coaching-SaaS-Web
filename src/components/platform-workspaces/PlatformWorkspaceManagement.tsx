@@ -159,6 +159,7 @@ export function PlatformWorkspaceManagement({
       if (
         event.shiftKey &&
         (document.activeElement === first ||
+          document.activeElement === dialogHeading.current ||
           !panel.contains(document.activeElement))
       ) {
         event.preventDefault();
