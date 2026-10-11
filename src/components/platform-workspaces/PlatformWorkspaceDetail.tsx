@@ -24,6 +24,8 @@ import {
   platformWorkspaceDirectoryKeys,
 } from "@/lib/platform-workspaces";
 import styles from "./platform-workspace-detail.module.css";
+import { PlatformWorkspaceManagement } from "./PlatformWorkspaceManagement";
+import type { PlatformWorkspaceManagementLabels } from "./PlatformWorkspaceCreate";
 
 const objectIdPattern = /^[0-9a-f]{24}$/;
 const utc = parseIanaTimeZone("UTC");
@@ -65,10 +67,12 @@ export function PlatformWorkspaceDetail({
   labels,
   locale,
   workspaceId,
+  managementLabels,
 }: {
   labels: PlatformWorkspaceDetailLabels;
   locale: Locale;
   workspaceId: string;
+  managementLabels?: PlatformWorkspaceManagementLabels;
 }) {
   const authority = usePlatformAuthority();
   const { apiClient, markSessionExpired } = useAuthSession();
@@ -235,6 +239,12 @@ export function PlatformWorkspaceDetail({
           </dd>
         </div>
       </DetailSection>
+      {managementLabels ? (
+        <PlatformWorkspaceManagement
+          labels={managementLabels}
+          workspaceId={workspaceId}
+        />
+      ) : null}
     </article>
   );
 }

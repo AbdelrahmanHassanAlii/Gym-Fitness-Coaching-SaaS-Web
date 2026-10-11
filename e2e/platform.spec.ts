@@ -37,3 +37,14 @@ test("protects a direct Platform workspace-detail deep link", async ({
     /\/login\?next=%2Fplatform%2Fworkspaces%2F68e7a9d10d56fd2b98d4a101$/,
   );
 });
+
+test("protects a direct Platform workspace-create deep link", async ({
+  page,
+}) => {
+  await page.goto("/platform/workspaces/new");
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create workspace" }),
+  ).not.toBeVisible();
+  await expect(page).toHaveURL(/\/login\?next=%2Fplatform%2Fworkspaces%2Fnew$/);
+});

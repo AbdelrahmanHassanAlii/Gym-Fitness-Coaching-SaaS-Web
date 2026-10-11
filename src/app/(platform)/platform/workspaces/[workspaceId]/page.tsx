@@ -19,6 +19,7 @@ export default async function PlatformWorkspaceDetailPage({
         statuses: messages.platformWorkspaces.statuses,
       }}
       locale={locale}
+      managementLabels={messages.platformWorkspaceManagement}
       workspaceId={workspaceId}
     />
   );

@@ -22,10 +22,19 @@ export type PlatformWorkspaceDetailIdentity = Omit<
   "limit" | "q" | "status"
 > & { workspaceId: WorkspaceId };
 
+export type PlatformOwnerCandidatesIdentity = Omit<
+  PlatformWorkspaceDirectoryIdentity,
+  "status"
+>;
+
 export const platformWorkspaceDirectoryKeys = {
   all: createQueryKey("platform-workspaces"),
   list: (identity: PlatformWorkspaceDirectoryIdentity): AppQueryKey =>
     createQueryKey("platform-workspaces", "directory", identity),
   detail: (identity: PlatformWorkspaceDetailIdentity): AppQueryKey =>
     createQueryKey("platform-workspaces", "detail", identity),
+  management: (identity: PlatformWorkspaceDetailIdentity): AppQueryKey =>
+    createQueryKey("platform-workspaces", "management-state", identity),
+  ownerCandidates: (identity: PlatformOwnerCandidatesIdentity): AppQueryKey =>
+    createQueryKey("platform-workspaces", "owner-candidates", identity),
 };

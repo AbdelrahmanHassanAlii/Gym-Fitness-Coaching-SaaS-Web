@@ -3,10 +3,16 @@ import type { MembershipId, UserId, WorkspaceId } from "@/contracts";
 import type { ApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import {
+  createPlatformWorkspace,
   getPlatformWorkspace,
+  getPlatformWorkspaceManagementState,
+  listPlatformWorkspaceOwnerCandidates,
   listPlatformWorkspaces,
   platformWorkspaceDirectoryKeys,
+  platformWorkspaceLifecycleActions,
   platformWorkspacePageLimit,
+  reassignPlatformWorkspaceOwner,
+  transitionPlatformWorkspaceLifecycle,
 } from "./index";
 
 const workspace = {
@@ -248,6 +254,191 @@ describe("Platform workspace directory contract", () => {
   });
 });
 
+describe("Platform workspace management contract", () => {
+  test("strictly decodes management-state and keeps owner/version separate from detail", async () => {
+    const response = managementState();
+    const request = vi.fn().mockResolvedValue(response);
+    await expect(
+      getPlatformWorkspaceManagementState(
+        { request } as unknown as ApiClient,
+        workspace.id as WorkspaceId,
+      ),
+    ).resolves.toEqual(response);
+    expect(request).toHaveBeenCalledWith({
+      method: "GET",
+      path: `/platform/workspaces/${workspace.id}/management-state`,
+      signal: undefined,
+    });
+    for (const malformed of [
+      { ...response, extra: true },
+      {
+        data: {
+          ...response.data,
+          owner: { ...response.data.owner, roles: ["GYM_OWNER"] },
+        },
+      },
+      {
+        data: {
+          ...response.data,
+          workspace: { ...response.data.workspace, version: -1 },
+        },
+      },
+      { data: { workspace: response.data.workspace } },
+    ]) {
+      const client = {
+        request: vi.fn().mockResolvedValue(malformed),
+      } as unknown as ApiClient;
+      await expect(
+        getPlatformWorkspaceManagementState(
+          client,
+          workspace.id as WorkspaceId,
+        ),
+      ).rejects.toMatchObject({ kind: "malformed-response" });
+    }
+  });
+
+  test("uses minimized owner candidates, exact q, bounded pages, and opaque cursor replay", async () => {
+    const opaque = "opaque:+/owner-token=";
+    const first = {
+      data: [
+        {
+          id: "68e7a9d10d56fd2b98d4a199",
+          displayName: "Owner",
+          email: "owner@example.com",
+        },
+      ],
+      meta: { hasMore: true, nextCursor: opaque },
+    };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({
+        data: [],
+        meta: { hasMore: false, nextCursor: null },
+      });
+    const client = { request } as unknown as ApiClient;
+    const page = await listPlatformWorkspaceOwnerCandidates(client, {
+      q: "owner@example.com",
+    });
+    await listPlatformWorkspaceOwnerCandidates(client, {
+      q: "owner@example.com",
+      cursor: page.meta.nextCursor!,
+    });
+    expect(request).toHaveBeenNthCalledWith(2, {
+      method: "GET",
+      path: "/platform/workspace-owner-candidates",
+      query: { cursor: opaque, limit: 50, q: "owner@example.com" },
+      signal: undefined,
+    });
+    const internal = {
+      ...first,
+      data: [{ ...first.data[0], memberships: [] }],
+    };
+    await expect(
+      listPlatformWorkspaceOwnerCandidates({
+        request: vi.fn().mockResolvedValue(internal),
+      } as unknown as ApiClient),
+    ).rejects.toMatchObject({ kind: "malformed-response" });
+  });
+
+  test("sends exact create, owner, and lifecycle mutations with idempotency and expectedVersion", async () => {
+    const response = { data: { workspace: managementState().data.workspace } };
+    const request = vi.fn().mockResolvedValue(response);
+    const client = { request } as unknown as ApiClient;
+    const createBody = {
+      type: "GYM" as const,
+      name: "Cairo Strength",
+      ownerUserId: "68e7a9d10d56fd2b98d4a199",
+      timezone: "Africa/Cairo",
+      defaultLanguage: "en" as const,
+    };
+    await createPlatformWorkspace(client, createBody, "create-key");
+    await reassignPlatformWorkspaceOwner(
+      client,
+      workspace.id as WorkspaceId,
+      { ownerUserId: createBody.ownerUserId, expectedVersion: 3 },
+      "owner-key",
+    );
+    await transitionPlatformWorkspaceLifecycle(
+      client,
+      workspace.id as WorkspaceId,
+      "archive",
+      4,
+      "archive-key",
+    );
+    expect(request.mock.calls.map(([value]) => value)).toEqual([
+      {
+        method: "POST",
+        path: "/platform/workspaces",
+        body: createBody,
+        idempotencyKey: "create-key",
+      },
+      {
+        method: "POST",
+        path: `/platform/workspaces/${workspace.id}/owner`,
+        body: { ownerUserId: createBody.ownerUserId, expectedVersion: 3 },
+        idempotencyKey: "owner-key",
+      },
+      {
+        method: "POST",
+        path: `/platform/workspaces/${workspace.id}/archive`,
+        body: { expectedVersion: 4 },
+        idempotencyKey: "archive-key",
+      },
+    ]);
+  });
+
+  test("isolates management and picker query identity by every authority dimension", () => {
+    const base = {
+      accessVersion: 7,
+      authorityValidUntil: "2030-01-01T00:00:00.000Z",
+      membershipId: "membership-a" as MembershipId,
+      principalId: "user-a" as UserId,
+      sessionGeneration: 4,
+    };
+    const management = platformWorkspaceDirectoryKeys.management({
+      ...base,
+      workspaceId: workspace.id as WorkspaceId,
+    });
+    const picker = platformWorkspaceDirectoryKeys.ownerCandidates({
+      ...base,
+      limit: 50,
+      q: "owner@example.com",
+    });
+    for (const changed of [
+      { ...base, principalId: "user-b" as UserId },
+      { ...base, sessionGeneration: 5 },
+      { ...base, membershipId: "membership-b" as MembershipId },
+      { ...base, accessVersion: 8 },
+      { ...base, authorityValidUntil: null },
+    ]) {
+      expect(
+        platformWorkspaceDirectoryKeys.management({
+          ...changed,
+          workspaceId: workspace.id as WorkspaceId,
+        }),
+      ).not.toEqual(management);
+      expect(
+        platformWorkspaceDirectoryKeys.ownerCandidates({
+          ...changed,
+          limit: 50,
+          q: "owner@example.com",
+        }),
+      ).not.toEqual(picker);
+    }
+  });
+
+  test.each([
+    ["PENDING_ACTIVATION", ["activate", "archive"]],
+    ["ACTIVE", ["restrict", "suspend", "archive"]],
+    ["RESTRICTED", ["activate", "suspend", "archive"]],
+    ["SUSPENDED", ["activate", "archive"]],
+    ["ARCHIVED", ["restore"]],
+  ] as const)("exposes the exact %s lifecycle matrix", (status, expected) => {
+    expect(platformWorkspaceLifecycleActions(status)).toEqual(expected);
+  });
+});
+
 function detailFixture() {
   return {
     id: workspace.id,
@@ -264,5 +455,18 @@ function page(row: unknown = workspace) {
   return {
     data: [row],
     meta: { hasMore: false, nextCursor: null },
+  };
+}
+
+function managementState() {
+  return {
+    data: {
+      workspace: { ...detailFixture(), version: 3 },
+      owner: {
+        id: "68e7a9d10d56fd2b98d4a199",
+        displayName: "Owner",
+        email: "owner@example.com",
+      },
+    },
   };
 }

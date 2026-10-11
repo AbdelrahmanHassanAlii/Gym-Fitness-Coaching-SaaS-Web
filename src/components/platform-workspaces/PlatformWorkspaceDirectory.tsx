@@ -35,6 +35,7 @@ const platformWorkspaceDirectoryTimeZone = parseIanaTimeZone("UTC");
 
 export interface PlatformWorkspaceDirectoryLabels {
   actions: {
+    create?: string;
     loadMore: string;
     loadingMore: string;
     refresh: string;
@@ -289,6 +290,11 @@ export function PlatformWorkspaceDirectory({
     >
       <header className={styles.header}>
         <h1 id="platform-workspace-directory-title">{labels.title}</h1>
+        {labels.actions.create ? (
+          <Link href={createWorkspaceHref(searchParams)}>
+            {labels.actions.create}
+          </Link>
+        ) : null}
         <button
           disabled={directory.isFetching}
           onClick={() => void restart()}
@@ -429,6 +435,17 @@ export function PlatformWorkspaceDirectory({
       ) : null}
     </section>
   );
+}
+
+function createWorkspaceHref(searchParams: {
+  get(name: string): string | null;
+}): string {
+  const query = new URLSearchParams();
+  for (const key of ["q", "status"]) {
+    const value = searchParams.get(key);
+    if (value) query.set(key, value);
+  }
+  return `/platform/workspaces/new${query.size ? `?${query}` : ""}`;
 }
 
 function validatePageChain(

@@ -1,0 +1,120 @@
+.page,
+.management {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 58rem;
+}
+.header,
+.actions,
+.pickerSearch,
+.dialogActions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.form {
+  display: grid;
+  gap: 1rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.field {
+  display: grid;
+  gap: 0.35rem;
+}
+.field input,
+.field select,
+.picker input {
+  min-width: 0;
+  width: 100%;
+  padding: 0.7rem;
+  border: 1px solid var(--border-color, #777);
+  border-radius: 0.5rem;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.picker {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.pickerSearch label {
+  flex: 1 1 15rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.ownerList {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 18rem;
+  overflow: auto;
+}
+.ownerList button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: start;
+  padding: 0.75rem;
+}
+.selected {
+  overflow-wrap: anywhere;
+}
+.error {
+  color: var(--error-color, #b42318);
+}
+.success {
+  color: var(--success-color, #067647);
+}
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.55);
+}
+.dialogPanel {
+  width: min(38rem, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--background, #fff);
+  color: inherit;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+}
+.danger {
+  background: #b42318;
+  color: #fff;
+}
+.currentOwner {
+  display: grid;
+  gap: 0.35rem;
+}
+.currentOwner dt {
+  font-weight: 700;
+}
+@media (max-width: 42rem) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .actions > * {
+    flex: 1 1 auto;
+  }
+  .pickerSearch {
+    align-items: stretch;
+  }
+  .pickerSearch label {
+    flex-basis: 100%;
+  }
+}

@@ -92,3 +92,40 @@ export interface PlatformWorkspaceDirectoryPageDto {
     hasMore: boolean;
   };
 }
+
+export interface PlatformWorkspaceManagementSummaryDto extends PlatformWorkspaceDetailDto {
+  version: number;
+}
+
+export interface PlatformWorkspaceOwnerDto {
+  id: import("@/contracts/common/ids").UserId;
+  displayName?: string;
+  email?: string;
+}
+
+export interface PlatformWorkspaceManagementStateDto {
+  data: {
+    workspace: PlatformWorkspaceManagementSummaryDto;
+    owner: PlatformWorkspaceOwnerDto;
+  };
+}
+
+export interface PlatformWorkspaceManagementResponseDto {
+  data: { workspace: PlatformWorkspaceManagementSummaryDto };
+}
+
+export interface PlatformWorkspaceOwnerCandidatePageDto {
+  data: readonly PlatformWorkspaceOwnerDto[];
+  meta: { nextCursor: string | null; hasMore: boolean };
+}
+
+export interface CreatePlatformWorkspaceInput {
+  type: WorkspaceType;
+  name: string;
+  ownerUserId: string;
+  timezone: string;
+  defaultLanguage: "ar" | "en";
+  country?: string;
+  city?: string;
+  governorate?: string;
+}
