@@ -1,6 +1,12 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { ApiError } from "@/lib/api";
@@ -92,12 +98,121 @@ describe("Platform workspace create", () => {
       labels.validation.required,
     );
     expect(mocks.request).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Workspace type")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(screen.getByLabelText("Workspace name")).toHaveAccessibleDescription(
+      labels.validation.required,
+    );
     fillRequired();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
       labels.validation.owner,
     );
+    expect(screen.getByRole("group", { name: "Owner" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(
+      screen.getByRole("group", { name: "Owner" }),
+    ).toHaveAccessibleDescription(labels.validation.owner);
   });
+
+  test("keeps the same key for a retryable 5xx without mislabeling it as a conflict", async () => {
+    mocks.request
+      .mockRejectedValueOnce(
+        new ApiError({
+          kind: "backend",
+          status: 503,
+          code: "SERVICE_UNAVAILABLE",
+          message: "unavailable",
+        }),
+      )
+      .mockResolvedValueOnce(success());
+    renderCreate();
+    fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Pick owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      labels.errors.unavailable,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+    expect(
+      mocks.request.mock.calls.map(([request]) => request.idempotencyKey),
+    ).toEqual(["create-key-1", "create-key-1"]);
+  });
+
+  test("retires an idempotency-conflicted intent and gives the next submission a fresh key", async () => {
+    mocks.request
+      .mockRejectedValueOnce(
+        new ApiError({
+          category: "idempotency-conflict",
+          kind: "backend",
+          status: 409,
+          code: "IDEMPOTENCY_KEY_CONFLICT",
+          message: "conflict",
+        }),
+      )
+      .mockResolvedValueOnce(success());
+    renderCreate();
+    fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Pick owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      labels.errors.idempotency,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+    expect(
+      mocks.request.mock.calls.map(([request]) => request.idempotencyKey),
+    ).toEqual(["create-key-1", "create-key-2"]);
+  });
+
+  test.each([
+    [
+      new ApiError({
+        kind: "malformed-response",
+        message: "bad response",
+      }),
+      labels.errors.malformed,
+    ],
+    [
+      new ApiError({
+        kind: "backend",
+        status: 409,
+        code: "WORKSPACE_ALREADY_EXISTS",
+        message: "conflict",
+      }),
+      labels.errors.createConflict,
+    ],
+    [
+      new ApiError({
+        kind: "backend",
+        status: 422,
+        code: "UNEXPECTED_SERVICE_ERROR",
+        message: "service error",
+      }),
+      labels.errors.unavailable,
+    ],
+  ])(
+    "classifies a non-retryable create failure safely",
+    async (failure, copy) => {
+      mocks.request.mockRejectedValue(failure);
+      renderCreate();
+      fillRequired();
+      fireEvent.click(screen.getByRole("button", { name: "Pick owner" }));
+      fireEvent.click(screen.getByRole("button", { name: "Create" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(copy);
+      expect(
+        screen.queryByRole("button", { name: "Retry" }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   test("sends exact payload, stable retry key, invalidates, and navigates", async () => {
     mocks.request
@@ -185,6 +300,28 @@ describe("Platform workspace create", () => {
         screen.getByRole("heading", { name: labels.createTitle }),
       ).toBeInTheDocument(),
     );
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  test("suppresses every late create side effect after authority expiry unmounts the form", async () => {
+    const mutation = deferred<ReturnType<typeof success>>();
+    mocks.request.mockReturnValue(mutation.promise);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const view = render(tree(client));
+    fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Pick owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    view.unmount();
+    await act(async () => {
+      mutation.resolve(success());
+      await mutation.promise;
+    });
+
+    expect(invalidate).not.toHaveBeenCalled();
     expect(mocks.push).not.toHaveBeenCalled();
   });
 });

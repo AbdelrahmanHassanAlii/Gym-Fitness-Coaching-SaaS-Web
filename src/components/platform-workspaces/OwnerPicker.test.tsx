@@ -124,6 +124,58 @@ describe("Owner picker", () => {
     });
     expect(screen.queryByText(/Stale/)).not.toBeInTheDocument();
   });
+
+  test("shows an empty initial candidate list", async () => {
+    mocks.request.mockResolvedValue(emptyPage());
+    renderPicker();
+    expect(await screen.findByText(labels.empty)).toBeInTheDocument();
+  });
+
+  test("shows an empty exact-email search result", async () => {
+    mocks.request
+      .mockResolvedValueOnce(page("Owner A", null, false))
+      .mockResolvedValueOnce(emptyPage());
+    renderPicker();
+    await screen.findByText(/Owner A/);
+    fireEvent.change(screen.getByLabelText(labels.search), {
+      target: { value: "missing@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: labels.apply }));
+    expect(await screen.findByText(labels.empty)).toBeInTheDocument();
+  });
+
+  test("shows and retries an initial request error", async () => {
+    mocks.request
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(page("Recovered", null, false));
+    renderPicker();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      labels.unavailable,
+    );
+    fireEvent.click(screen.getByRole("button", { name: labels.retry }));
+    expect(await screen.findByText(/Recovered/)).toBeInTheDocument();
+  });
+
+  test("keeps loaded owners visible and retries a continuation error", async () => {
+    mocks.request
+      .mockResolvedValueOnce(page("Owner A", "continuation-token", true))
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(page("Owner B", null, false));
+    renderPicker();
+    await screen.findByText(/Owner A/);
+    fireEvent.click(screen.getByRole("button", { name: labels.loadMore }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      labels.unavailable,
+    );
+    expect(screen.getByText(/Owner A/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: labels.retry }));
+    expect(await screen.findByText(/Owner B/)).toBeInTheDocument();
+    expect(mocks.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: { cursor: "continuation-token", limit: 50 },
+      }),
+    );
+  });
 });
 
 function renderPicker(onSelect = vi.fn(), onForbidden = vi.fn()) {
@@ -161,6 +213,9 @@ function page(name: string, nextCursor: string | null, hasMore: boolean) {
     ],
     meta: { nextCursor, hasMore },
   };
+}
+function emptyPage() {
+  return { data: [], meta: { nextCursor: null, hasMore: false } };
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;

@@ -24,6 +24,7 @@ import {
   createPlatformWorkspace,
   platformWorkspaceDirectoryKeys,
 } from "@/lib/platform-workspaces";
+import { useProtectedAsyncEpoch } from "@/lib/platform-workspaces/use-protected-async-epoch";
 import { OwnerPicker, type OwnerPickerLabels } from "./OwnerPicker";
 import styles from "./platform-workspace-management.module.css";
 
@@ -62,6 +63,7 @@ export interface PlatformWorkspaceManagementLabels {
   errors: Record<
     | "validation"
     | "forbidden"
+    | "createConflict"
     | "conflict"
     | "idempotency"
     | "unavailable"
@@ -96,6 +98,11 @@ export function PlatformWorkspaceCreate({
   const [pending, setPending] = useState(false);
   const [denied, setDenied] = useState(false);
   const [error, setError] = useState<string>();
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<
+      Record<"type" | "name" | "owner" | "timezone" | "defaultLanguage", string>
+    >
+  >({});
   const [retryIntent, setRetryIntent] = useState<Intent>();
   const authorized = authority.allows("platform_workspaces.manage") && !denied;
   const timezones = useMemo(() => supportedTimeZones(), []);
@@ -107,6 +114,7 @@ export function PlatformWorkspaceCreate({
     authority.validUntil,
   ]);
   const latestIdentity = useRef(identityToken);
+  const asyncEpoch = useProtectedAsyncEpoch(identityToken);
   useEffect(() => {
     latestIdentity.current = identityToken;
     // Authority identity changes retire create state from the previous identity.
@@ -114,6 +122,8 @@ export function PlatformWorkspaceCreate({
     setDenied(false);
     setOwner(undefined);
     setRetryIntent(undefined);
+    setError(undefined);
+    setFieldErrors({});
     setPending(false);
   }, [identityToken]);
   const backHref = useMemo(() => {
@@ -125,14 +135,20 @@ export function PlatformWorkspaceCreate({
     return `/platform/workspaces${next.size ? `?${next}` : ""}`;
   }, [searchParams]);
   const retire = useCallback(() => {
+    asyncEpoch.invalidate();
     setDenied(true);
     setOwner(undefined);
     setRetryIntent(undefined);
+    setError(undefined);
+    setFieldErrors({});
+    setPending(false);
     void authority.refresh();
-  }, [authority]);
+  }, [asyncEpoch, authority]);
 
   async function run(intent: Intent) {
     if (pending || !authorized) return;
+    const startedEpoch = asyncEpoch.capture();
+    if (startedEpoch === undefined) return;
     setPending(true);
     setError(undefined);
     const startedIdentity = latestIdentity.current;
@@ -142,12 +158,17 @@ export function PlatformWorkspaceCreate({
         intent.payload,
         intent.key,
       );
-      if (startedIdentity !== latestIdentity.current) return;
+      if (
+        startedIdentity !== latestIdentity.current ||
+        !asyncEpoch.isCurrent(startedEpoch)
+      )
+        return;
       setRetryIntent(undefined);
       await queryClient.invalidateQueries({
         queryKey: platformWorkspaceDirectoryKeys.all,
         predicate: (query) => query.queryKey[2] === "directory",
       });
+      if (!asyncEpoch.isCurrent(startedEpoch)) return;
       const preservedQuery = backHref.includes("?")
         ? backHref.slice(backHref.indexOf("?"))
         : "";
@@ -155,15 +176,19 @@ export function PlatformWorkspaceCreate({
         `/platform/workspaces/${response.data.workspace.id}${preservedQuery}`,
       );
     } catch (caught) {
-      if (startedIdentity !== latestIdentity.current) return;
+      if (
+        startedIdentity !== latestIdentity.current ||
+        !asyncEpoch.isCurrent(startedEpoch)
+      )
+        return;
       if (isApiError(caught) && caught.status === 403) {
         retire();
         return;
       }
-      setRetryIntent(intent);
+      setRetryIntent(isRetryableCreateError(caught) ? intent : undefined);
       setError(createError(caught, labels));
     } finally {
-      setPending(false);
+      if (asyncEpoch.isCurrent(startedEpoch)) setPending(false);
     }
   }
 
@@ -175,6 +200,16 @@ export function PlatformWorkspaceCreate({
     const timezone = String(data.get("timezone") ?? "");
     const defaultLanguage = String(data.get("defaultLanguage") ?? "") as
       "ar" | "en";
+    const nextFieldErrors = {
+      ...(!type ? { type: labels.validation.required } : {}),
+      ...(!name ? { name: labels.validation.required } : {}),
+      ...(!timezone ? { timezone: labels.validation.required } : {}),
+      ...(!defaultLanguage
+        ? { defaultLanguage: labels.validation.required }
+        : {}),
+      ...(!owner ? { owner: labels.validation.owner } : {}),
+    };
+    setFieldErrors(nextFieldErrors);
     if (!name || !type || !timezone || !defaultLanguage) {
       setError(labels.validation.required);
       return;
@@ -198,6 +233,7 @@ export function PlatformWorkspaceCreate({
         : {}),
     };
     setRetryIntent(undefined);
+    setError(undefined);
     void run({ key: createIdempotencyKey(), payload });
   }
 
@@ -207,8 +243,22 @@ export function PlatformWorkspaceCreate({
       <h1>{labels.createTitle}</h1>
       <form className={styles.form} noValidate onSubmit={submit}>
         <div className={styles.grid}>
-          <Field label={labels.fields.type}>
-            <select name="type" required defaultValue="">
+          <Field
+            controlId="workspace-type"
+            error={fieldErrors.type}
+            errorId="workspace-type-error"
+            label={labels.fields.type}
+          >
+            <select
+              aria-describedby={
+                fieldErrors.type ? "workspace-type-error" : undefined
+              }
+              aria-invalid={Boolean(fieldErrors.type)}
+              id="workspace-type"
+              name="type"
+              required
+              defaultValue=""
+            >
               <option disabled value="">
                 —
               </option>
@@ -218,11 +268,34 @@ export function PlatformWorkspaceCreate({
               </option>
             </select>
           </Field>
-          <Field label={labels.fields.name}>
-            <input name="name" required />
+          <Field
+            controlId="workspace-name"
+            error={fieldErrors.name}
+            errorId="workspace-name-error"
+            label={labels.fields.name}
+          >
+            <input
+              aria-describedby={
+                fieldErrors.name ? "workspace-name-error" : undefined
+              }
+              aria-invalid={Boolean(fieldErrors.name)}
+              id="workspace-name"
+              name="name"
+              required
+            />
           </Field>
-          <Field label={labels.fields.timezone}>
+          <Field
+            controlId="workspace-timezone"
+            error={fieldErrors.timezone}
+            errorId="workspace-timezone-error"
+            label={labels.fields.timezone}
+          >
             <select
+              aria-describedby={
+                fieldErrors.timezone ? "workspace-timezone-error" : undefined
+              }
+              aria-invalid={Boolean(fieldErrors.timezone)}
+              id="workspace-timezone"
               name="timezone"
               required
               defaultValue={
@@ -234,33 +307,63 @@ export function PlatformWorkspaceCreate({
               ))}
             </select>
           </Field>
-          <Field label={labels.fields.defaultLanguage}>
-            <select name="defaultLanguage" required defaultValue={locale}>
+          <Field
+            controlId="workspace-language"
+            error={fieldErrors.defaultLanguage}
+            errorId="workspace-language-error"
+            label={labels.fields.defaultLanguage}
+          >
+            <select
+              aria-describedby={
+                fieldErrors.defaultLanguage
+                  ? "workspace-language-error"
+                  : undefined
+              }
+              aria-invalid={Boolean(fieldErrors.defaultLanguage)}
+              id="workspace-language"
+              name="defaultLanguage"
+              required
+              defaultValue={locale}
+            >
               <option value="ar">{labels.languages.ar}</option>
               <option value="en">{labels.languages.en}</option>
             </select>
           </Field>
-          <Field label={labels.fields.country}>
-            <input name="country" />
+          <Field controlId="workspace-country" label={labels.fields.country}>
+            <input id="workspace-country" name="country" />
           </Field>
-          <Field label={labels.fields.governorate}>
-            <input name="governorate" />
+          <Field
+            controlId="workspace-governorate"
+            label={labels.fields.governorate}
+          >
+            <input id="workspace-governorate" name="governorate" />
           </Field>
-          <Field label={labels.fields.city}>
-            <input name="city" />
+          <Field controlId="workspace-city" label={labels.fields.city}>
+            <input id="workspace-city" name="city" />
           </Field>
         </div>
-        <fieldset>
+        <fieldset
+          aria-describedby={
+            fieldErrors.owner ? "workspace-owner-error" : undefined
+          }
+          aria-invalid={Boolean(fieldErrors.owner)}
+        >
           <legend>{labels.fields.owner}</legend>
           <OwnerPicker
             labels={labels.ownerPicker}
             onForbidden={retire}
             onSelect={(value) => {
               setOwner(value);
+              setFieldErrors((current) => ({ ...current, owner: undefined }));
               setRetryIntent(undefined);
             }}
             selected={owner}
           />
+          {fieldErrors.owner ? (
+            <p className={styles.error} id="workspace-owner-error">
+              {fieldErrors.owner}
+            </p>
+          ) : null}
         </fieldset>
         {error ? (
           <p className={styles.error} role="alert">
@@ -289,16 +392,27 @@ export function PlatformWorkspaceCreate({
 
 function Field({
   children,
+  controlId,
+  error,
+  errorId,
   label,
 }: {
   children: React.ReactNode;
+  controlId: string;
+  error?: string;
+  errorId?: string;
   label: string;
 }) {
   return (
-    <label className={styles.field}>
-      <span>{label}</span>
+    <div className={styles.field}>
+      <label htmlFor={controlId}>{label}</label>
       {children}
-    </label>
+      {error ? (
+        <span className={styles.error} id={errorId}>
+          {error}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -319,6 +433,15 @@ function createError(
   if (error.status === 400) return labels.errors.validation;
   if (error.category === "idempotency-conflict")
     return labels.errors.idempotency;
-  if (error.kind === "malformed-response") return labels.errors.malformed;
-  return labels.errors.conflict;
+  if (error.kind === "malformed-response" || error.kind === "non-json-response")
+    return labels.errors.malformed;
+  if (error.status === 409) return labels.errors.createConflict;
+  return labels.errors.unavailable;
+}
+
+function isRetryableCreateError(error: unknown): boolean {
+  if (!isApiError(error)) return true;
+  if (error.kind === "network") return true;
+  if (error.kind !== "backend") return false;
+  return error.status === undefined || error.status >= 500;
 }

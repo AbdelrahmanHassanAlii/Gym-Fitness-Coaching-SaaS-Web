@@ -317,6 +317,8 @@ export const messages = {
       errors: {
         validation: "راجع بيانات الطلب.",
         forbidden: "لم تعد مخولًا لإدارة مساحات العمل.",
+        createConflict:
+          "تعذر إنشاء مساحة العمل بسبب تعارض. راجع البيانات وابدأ محاولة إنشاء جديدة.",
         conflict:
           "تغيرت مساحة العمل. تم تحميل أحدث حالة؛ راجع الإجراء وأكده مجددًا.",
         idempotency: "تعارض مفتاح الطلب. راجع أحدث حالة وابدأ إجراءً جديدًا.",
@@ -1553,6 +1555,8 @@ export const messages = {
       errors: {
         validation: "Review the request details.",
         forbidden: "You are no longer authorized to manage workspaces.",
+        createConflict:
+          "The workspace could not be created because of a conflict. Review the details and start a new create action.",
         conflict:
           "The workspace changed. The latest state was loaded; review and confirm the action again.",
         idempotency:
