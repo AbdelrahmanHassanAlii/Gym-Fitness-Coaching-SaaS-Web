@@ -9,6 +9,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { RouterContext } from "next/dist/shared/lib/router-context.shared-runtime";
+import type { NextRouter } from "next/router";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { MembershipId, UserId } from "@/contracts";
 import type { AuthSessionContextValue, AuthState } from "@/lib/auth";
@@ -51,6 +53,7 @@ const mocks = vi.hoisted(() => ({
     verifyMfaLogin: vi.fn(),
   },
   pathname: "/platform",
+  push: vi.fn(),
   refresh: vi.fn(),
   searchParams: new URLSearchParams(),
 }));
@@ -61,7 +64,7 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
-  useRouter: () => ({ refresh: mocks.refresh }),
+  useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }),
   useSearchParams: () => mocks.searchParams,
 }));
 
@@ -75,6 +78,7 @@ describe("Platform shell", () => {
     mocks.authSession.generation = 4;
     mocks.authSession.state = authenticatedState();
     mocks.pathname = "/platform";
+    mocks.push.mockReset();
     mocks.searchParams = new URLSearchParams();
   });
 
@@ -443,21 +447,14 @@ describe("Platform shell", () => {
       "href",
       "/platform/workspaces?q=Alpha&status=ACTIVE",
     );
-    const navigatedTo = vi.fn();
-    back.addEventListener(
-      "click",
-      (event) => {
-        event.preventDefault();
-        navigatedTo(
-          (event.currentTarget as HTMLAnchorElement).getAttribute("href"),
-        );
-      },
-      { once: true },
-    );
     fireEvent.click(back);
-    expect(navigatedTo).toHaveBeenCalledWith(
-      "/platform/workspaces?q=Alpha&status=ACTIVE",
-    );
+    const destination = mocks.push.mock.calls.at(-1)?.[0];
+    expect(destination).toBe("/platform/workspaces?q=Alpha&status=ACTIVE");
+    const destinationUrl = new URL(destination, "https://hassan.test");
+    expect(destinationUrl.pathname).toBe("/platform/workspaces");
+    expect(destinationUrl.searchParams.get("q")).toBe("Alpha");
+    expect(destinationUrl.searchParams.get("status")).toBe("ACTIVE");
+    expect([...destinationUrl.searchParams.keys()]).toEqual(["q", "status"]);
     expect(decisions).toBe(1);
     expect(mocks.authSession.markSessionExpired).not.toHaveBeenCalled();
   });
@@ -827,14 +824,38 @@ function shellTree(
   children = <h1>Platform foundation</h1>,
 ) {
   return (
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <PlatformShell labels={labels} locale="en">
-          {children}
-        </PlatformShell>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <RouterContext.Provider value={testRouter()}>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <PlatformShell labels={labels} locale="en">
+            {children}
+          </PlatformShell>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </RouterContext.Provider>
   );
+}
+
+function testRouter(): NextRouter {
+  return {
+    asPath: mocks.pathname,
+    back: vi.fn(),
+    basePath: "",
+    beforePopState: vi.fn(),
+    events: { emit: vi.fn(), off: vi.fn(), on: vi.fn() },
+    forward: vi.fn(),
+    isFallback: false,
+    isLocaleDomain: false,
+    isPreview: false,
+    isReady: true,
+    pathname: mocks.pathname,
+    prefetch: vi.fn(),
+    push: mocks.push,
+    query: {},
+    reload: vi.fn(),
+    replace: vi.fn(),
+    route: mocks.pathname,
+  };
 }
 
 function AuthorityProbe() {
