@@ -70,6 +70,7 @@ class FetchApiClient implements ApiClient {
         : await this.accessTokenProvider?.();
 
     return {
+      cache: options.cache,
       accessToken,
       body: options.body,
       credentials: options.credentials ?? this.credentials,
@@ -99,6 +100,7 @@ class FetchApiClient implements ApiClient {
 
     try {
       response = await this.fetchImpl(url, {
+        cache: options.cache,
         body:
           options.body === undefined ? undefined : JSON.stringify(options.body),
         credentials: options.credentials,

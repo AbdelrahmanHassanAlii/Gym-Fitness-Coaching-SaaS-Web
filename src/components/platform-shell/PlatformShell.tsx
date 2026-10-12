@@ -11,6 +11,8 @@ import type {
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { useAuthSession } from "@/lib/auth";
+import { getSupportLabels } from "@/i18n/support";
+import { useOptionalSupportRuntime } from "@/lib/platform-support/support-context";
 import { isApiError } from "@/lib/api";
 import {
   isPlatformAccessVersionConflict,
@@ -19,6 +21,7 @@ import {
   platformDecisionRequests,
   platformWorkspaceDecisionRequests,
   platformUserManagementDecisionRequests,
+  platformSupportDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
@@ -88,13 +91,17 @@ export function PlatformShell({
 }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const decisionRequests = /^\/platform\/workspaces\/[0-9a-f]{24}$/.test(
-    pathname,
-  )
-    ? platformWorkspaceDecisionRequests
-    : /^\/platform\/users\/[0-9a-f]{24}$/.test(pathname)
-      ? platformUserManagementDecisionRequests
-      : platformDecisionRequests;
+  const supportRoute =
+    pathname.startsWith("/platform/support") ||
+    /^\/platform\/workspaces\/[^/]+\/support$/.test(pathname);
+  const runtime = useOptionalSupportRuntime();
+  const decisionRequests = supportRoute
+    ? platformSupportDecisionRequests
+    : /^\/platform\/workspaces\/[0-9a-f]{24}$/.test(pathname)
+      ? platformWorkspaceDecisionRequests
+      : /^\/platform\/users\/[0-9a-f]{24}$/.test(pathname)
+        ? platformUserManagementDecisionRequests
+        : platformDecisionRequests;
   const { apiClient, generation, logout, markSessionExpired, state } =
     useAuthSession();
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -260,6 +267,37 @@ export function PlatformShell({
     restricted: isAuthenticated && state.restrictedUntilVerified,
   });
 
+  useEffect(() => {
+    if (!supportRoute || !runtime) return;
+    if (
+      (accessState !== "READY" && accessState !== "DENIED") ||
+      !activeMembership ||
+      !principalId ||
+      !decisionsQuery.data
+    ) {
+      runtime.observeAuthority(null);
+      return;
+    }
+    runtime.observeAuthority({
+      principalId,
+      sessionGeneration: generation,
+      membershipId: activeMembership.id,
+      accessVersion: activeMembership.accessVersion,
+      validUntil: decisionsQuery.data.validUntil,
+      permissions: decisionsQuery.data.decisions
+        .filter((d) => d.allowed && d.permission.startsWith("support."))
+        .map((d) => d.permission),
+    });
+  }, [
+    runtime,
+    supportRoute,
+    accessState,
+    activeMembership,
+    principalId,
+    generation,
+    decisionsQuery.data,
+  ]);
+
   if (accessState !== "READY" && accessState !== "DENIED") {
     return (
       <PlatformAccessStatePanel
@@ -330,6 +368,14 @@ export function PlatformShell({
           <strong>Hassan</strong>
         </div>
         <nav aria-label={labels.portalLabel} className={styles.nav}>
+          <Link
+            className={styles.navLink}
+            href="/platform/support"
+            aria-current={supportRoute ? "page" : undefined}
+            onClick={() => setMenuOpen(false)}
+          >
+            {getSupportLabels(locale).title}
+          </Link>
           <Link
             aria-current={pathname === "/platform" ? "page" : undefined}
             className={styles.navLink}

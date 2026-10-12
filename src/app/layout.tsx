@@ -33,7 +33,7 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <AppProviders>{children}</AppProviders>
+        <AppProviders locale={locale}>{children}</AppProviders>
       </body>
     </html>
   );

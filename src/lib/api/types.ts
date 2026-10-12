@@ -21,6 +21,7 @@ export interface ApiRequestOptions<
   signal?: AbortSignal;
   credentials?: RequestCredentials;
   refreshOnUnauthorized?: boolean;
+  cache?: RequestCache;
 }
 
 export interface CookieRefreshOptions {
@@ -47,6 +48,7 @@ export interface ApiClient {
 }
 
 export interface NormalizedRequestOptions {
+  cache?: RequestCache;
   accessToken?: string | null;
   body?: unknown;
   credentials?: RequestCredentials;

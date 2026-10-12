@@ -14,6 +14,10 @@ export const platformFoundationPermissions = [
   "platform_permissions.manage",
   "platform_workspaces.manage",
   "subscriptions.read",
+  "support.sessions.start",
+  "support.sessions.read",
+  "support.sessions.end_own",
+  "support.sessions.revoke",
 ] as const;
 
 export type PlatformMembershipStatus =

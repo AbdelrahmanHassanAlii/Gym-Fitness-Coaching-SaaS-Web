@@ -18,6 +18,7 @@ import type {
 } from "@/contracts";
 import { platformWorkspaceStatuses } from "@/contracts";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
+import { getSupportLabels } from "@/i18n/support";
 import { isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
 import {
@@ -221,6 +222,9 @@ export function PlatformWorkspaceDetail({
       <header>
         <p className={styles.eyebrow}>{labels.title}</p>
         <h1 id="platform-workspace-detail-title">{workspace.name}</h1>
+        <Link href={`/platform/workspaces/${workspace.id}/support`}>
+          {getSupportLabels(locale).title}
+        </Link>
       </header>
       <DetailSection title={labels.sections.workspace}>
         <Fact label={labels.fields.name} value={workspace.name} />

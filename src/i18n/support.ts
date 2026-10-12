@@ -1,0 +1,183 @@
+import type { Locale } from "./locales";
+const en = {
+  title: "Support Access",
+  start: "Start Support",
+  end: "End Support",
+  revoke: "Revoke Support Access",
+  console: "Return to support console",
+  enter: "Enter read-only workspace",
+  leave: "Leave selected support context",
+  boundary:
+    "Support access is read-only and workspace-bound. This console does not list all sessions or policies.",
+  known:
+    "Use an already-known workspace ID and its canonical type. Workspace discovery requires separate workspace-management authority.",
+  workspace: "Workspace",
+  workspaceId: "Workspace ID",
+  type: "Workspace type",
+  gym: "Gym",
+  trainer: "Independent trainer",
+  reason: "Reason",
+  reference: "Reference",
+  duration: "Duration (minutes)",
+  readOnly: "Read Only",
+  context: "Workspace support",
+  contextType: "Context type",
+  sessionType: "Session type",
+  expires: "Expires At",
+  started: "Started At",
+  version: "Version",
+  status: "Status",
+  session: "Support Session",
+  timezone: "Timezone",
+  language: "Language",
+  privacy:
+    "Do not include passwords, credentials, unnecessary medical information or sensitive personal data.",
+  bounds:
+    "Reason: 3–500 characters. Reference: up to 120 characters. Duration: 1–60 whole minutes.",
+  invalid: "Review the workspace ID, type, reason, reference and duration.",
+  confirm: "Confirm read-only support access",
+  confirmRevoke: "Confirm revocation",
+  cancel: "Cancel",
+  proceed: "Confirm",
+  retry: "Retry",
+  retryIntent: "Retry the same start request",
+  loading: "Loading…",
+  pending: "Validating current support access…",
+  denied: "This support action is unavailable with your current authority.",
+  failed:
+    "Support access could not be validated. Review the current state before trying again.",
+  uncertain:
+    "The result is uncertain. Retry the same start request to check its outcome. Do not start a replacement request.",
+  endUncertain:
+    "The termination result is uncertain. Support mode has been retired. Reconcile the session before retrying.",
+  reconcile: "Reconcile session",
+  conflict:
+    "The session changed. Review the refreshed status and version before another action.",
+  lost: "Support access is no longer available. Workspace data has been cleared.",
+  expired: "Support access expired. Workspace data has been cleared.",
+  ended: "Support mode ended. Workspace data has been cleared.",
+  inactive: "No validated support context is selected.",
+  detail: "Administrative session detail",
+  detailCopy:
+    "An Active administrative status does not prove current runtime access. Entry requires separate current-context validation.",
+  readDenied: "Session detail requires separate session-read authority.",
+  accessDenied:
+    "Support access was denied. Check authority and policy with an administrator.",
+  auth: "An unrestricted, MFA-verified Platform session is required.",
+  targetDenied: "The requested target could not be accepted.",
+  keyConflict:
+    "This start request cannot be reused. Review the target before confirming a new request.",
+  inProgress:
+    "The start request is still being resolved. Retry this same request explicitly.",
+  directory: "Browse authorized workspaces",
+  refresh: "Validate current context",
+  targetChanged:
+    "Leave the current support context before selecting another workspace.",
+  terminal: "This session is terminal. End and revoke are unavailable.",
+  acknowledge:
+    "Administrative actions apply only to this session and its displayed version.",
+  statuses: {
+    ACTIVE: "Active",
+    ENDED: "Ended",
+    EXPIRED: "Expired",
+    REVOKED: "Revoked",
+    SECURITY_TERMINATED: "Security Terminated",
+  },
+  workspaceStatuses: {
+    PENDING_ACTIVATION: "Pending activation",
+    ACTIVE: "Active",
+    RESTRICTED: "Restricted",
+    SUSPENDED: "Suspended",
+    ARCHIVED: "Archived",
+  },
+};
+const ar: typeof en = {
+  title: "وصول الدعم",
+  start: "بدء جلسة دعم",
+  end: "إنهاء جلسة الدعم",
+  revoke: "إلغاء وصول الدعم",
+  console: "العودة إلى وحدة الدعم",
+  enter: "دخول مساحة العمل للقراءة فقط",
+  leave: "مغادرة سياق الدعم المحدد",
+  boundary:
+    "وصول الدعم للقراءة فقط ومقيد بمساحة عمل. لا تعرض هذه الوحدة جميع الجلسات أو السياسات.",
+  known:
+    "استخدم معرّف مساحة عمل معروفًا ونوعها المعتمد. يتطلب استعراض المساحات صلاحية مستقلة لإدارة مساحات العمل.",
+  workspace: "مساحة العمل",
+  workspaceId: "معرّف مساحة العمل",
+  type: "نوع مساحة العمل",
+  gym: "صالة رياضية",
+  trainer: "مدرب مستقل",
+  reason: "سبب الوصول",
+  reference: "المرجع",
+  duration: "المدة (بالدقائق)",
+  readOnly: "للقراءة فقط",
+  context: "دعم مساحة العمل",
+  contextType: "نوع السياق",
+  sessionType: "نوع الجلسة",
+  expires: "ينتهي في",
+  started: "بدأت في",
+  version: "الإصدار",
+  status: "الحالة",
+  session: "جلسة دعم",
+  timezone: "المنطقة الزمنية",
+  language: "اللغة",
+  privacy:
+    "لا تُدرج كلمات مرور أو بيانات اعتماد أو معلومات طبية غير ضرورية أو بيانات شخصية حساسة.",
+  bounds:
+    "سبب الوصول: 3–500 حرف. المرجع: حتى 120 حرفًا. المدة: 1–60 دقيقة كاملة.",
+  invalid: "راجع معرّف مساحة العمل والنوع والسبب والمرجع والمدة.",
+  confirm: "تأكيد وصول الدعم للقراءة فقط",
+  confirmRevoke: "تأكيد إلغاء الوصول",
+  cancel: "إلغاء",
+  proceed: "تأكيد",
+  retry: "إعادة المحاولة",
+  retryIntent: "إعادة محاولة طلب البدء نفسه",
+  loading: "جارٍ التحميل…",
+  pending: "جارٍ التحقق من وصول الدعم الحالي…",
+  denied: "هذا الإجراء غير متاح بصلاحياتك الحالية.",
+  failed: "تعذر التحقق من وصول الدعم. راجع الحالة الحالية قبل المحاولة مجددًا.",
+  uncertain:
+    "نتيجة الطلب غير مؤكدة. أعد محاولة طلب البدء نفسه للتحقق من النتيجة. لا تبدأ طلبًا بديلًا.",
+  endUncertain:
+    "نتيجة الإنهاء غير مؤكدة. تم إنهاء وضع الدعم محليًا. تحقق من حالة الجلسة قبل المحاولة مجددًا.",
+  reconcile: "التحقق من حالة الجلسة",
+  conflict: "تغيّرت الجلسة. راجع الحالة والإصدار المحدّثين قبل إجراء آخر.",
+  lost: "لم يعد وصول الدعم متاحًا. تم مسح بيانات مساحة العمل.",
+  expired: "انتهت صلاحية وصول الدعم. تم مسح بيانات مساحة العمل.",
+  ended: "انتهى وضع الدعم. تم مسح بيانات مساحة العمل.",
+  inactive: "لا يوجد سياق دعم محدد تم التحقق منه.",
+  detail: "تفاصيل جلسة الدعم الإدارية",
+  detailCopy:
+    "الحالة الإدارية النشطة لا تثبت صلاحية الوصول الحالي. يتطلب الدخول تحققًا مستقلًا من سياق الدعم الحالي.",
+  readDenied: "تتطلب تفاصيل الجلسة صلاحية مستقلة لقراءة الجلسات.",
+  accessDenied: "تم رفض وصول الدعم. راجع الصلاحيات والسياسة مع المسؤول.",
+  auth: "يلزم تسجيل دخول للمنصة غير مقيد مع تحقق بالمصادقة الثنائية.",
+  targetDenied: "تعذر قبول الهدف المطلوب.",
+  keyConflict:
+    "لا يمكن إعادة استخدام طلب البدء هذا. راجع الهدف قبل تأكيد طلب جديد.",
+  inProgress: "لا يزال طلب البدء قيد المعالجة. أعد محاولة الطلب نفسه صراحةً.",
+  directory: "استعراض مساحات العمل المصرح بها",
+  refresh: "التحقق من السياق الحالي",
+  targetChanged: "غادر سياق الدعم الحالي قبل اختيار مساحة عمل أخرى.",
+  terminal: "هذه الجلسة منتهية. الإنهاء وإلغاء الوصول غير متاحين.",
+  acknowledge: "تُطبّق الإجراءات الإدارية على هذه الجلسة وإصدارها المعروض فقط.",
+  statuses: {
+    ACTIVE: "نشطة",
+    ENDED: "منتهية",
+    EXPIRED: "انتهت صلاحيتها",
+    REVOKED: "ملغاة",
+    SECURITY_TERMINATED: "أُنهِيت لأسباب أمنية",
+  },
+  workspaceStatuses: {
+    PENDING_ACTIVATION: "بانتظار التفعيل",
+    ACTIVE: "نشطة",
+    RESTRICTED: "مقيدة",
+    SUSPENDED: "موقوفة",
+    ARCHIVED: "مؤرشفة",
+  },
+};
+export type SupportLabels = typeof en;
+export function getSupportLabels(locale: Locale): SupportLabels {
+  return locale === "ar" ? ar : en;
+}

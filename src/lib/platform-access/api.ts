@@ -23,7 +23,8 @@ export const platformDecisionRequests = Object.freeze(
       (permission) =>
         permission !== "subscriptions.read" &&
         permission !== "platform_users.manage" &&
-        permission !== "platform_permissions.manage",
+        permission !== "platform_permissions.manage" &&
+        !permission.startsWith("support."),
     )
     .map((permission) => Object.freeze({ permission })),
 ) satisfies readonly PlatformDecisionRequestDto[];
@@ -36,6 +37,18 @@ export const platformUserManagementDecisionRequests = Object.freeze([
   ...platformDecisionRequests,
   Object.freeze({ permission: "platform_users.manage" as const }),
   Object.freeze({ permission: "platform_permissions.manage" as const }),
+]);
+
+export const platformSupportDecisionRequests = Object.freeze([
+  ...platformDecisionRequests,
+  ...(
+    [
+      "support.sessions.start",
+      "support.sessions.read",
+      "support.sessions.end_own",
+      "support.sessions.revoke",
+    ] as const
+  ).map((permission) => Object.freeze({ permission })),
 ]);
 
 export async function requestPlatformContext(
