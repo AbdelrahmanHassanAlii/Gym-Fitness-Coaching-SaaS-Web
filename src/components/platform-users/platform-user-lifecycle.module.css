@@ -1,0 +1,68 @@
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.card h2,
+.dialog h3 {
+  margin-block-start: 0;
+}
+.card dl {
+  display: grid;
+  gap: var(--space-2);
+}
+.card dd {
+  margin-inline-start: 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.card button {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  min-block-size: 2.75rem;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+.card button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.card button:focus-visible,
+.card h2:focus-visible,
+.dialog h3:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(0 0 0 / 50%);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+.dialog {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  inline-size: min(100%, 32rem);
+  max-block-size: 90dvh;
+  overflow: auto;
+}
+@media (max-width: 30rem) {
+  .actions {
+    flex-direction: column;
+  }
+  .actions button {
+    inline-size: 100%;
+  }
+}

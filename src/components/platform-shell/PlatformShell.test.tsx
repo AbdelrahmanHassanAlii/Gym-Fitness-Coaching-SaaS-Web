@@ -74,6 +74,191 @@ vi.mock("next/navigation", () => ({
 const maxSafeTimerDelay = 2_147_483_647;
 
 describe("Platform shell", () => {
+  test.each(["GET", "mutation"])(
+    "actual shell expiry retires lifecycle and ignores late %s while READ is renewed",
+    async (kind) => {
+      const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+      mocks.pathname = `/platform/users/${workspaceId}`;
+      const late = deferred<unknown>();
+      let decisions = 0,
+        managementReads = 0;
+      const at = "2026-10-09T08:00:00.000Z";
+      const detail = {
+        data: {
+          id: workspaceId,
+          displayName: "Independent readable member",
+          status: "ACTIVE",
+          createdAt: at,
+          updatedAt: at,
+          platformMembership: {
+            id: workspaceId,
+            status: "ACTIVE",
+            createdAt: at,
+            updatedAt: at,
+          },
+        },
+      };
+      const management = {
+        data: {
+          userId: workspaceId,
+          platformMembership: {
+            id: workspaceId,
+            status: "ACTIVE",
+            version: 4,
+            suspendedAt: null,
+            endedAt: null,
+          },
+        },
+      };
+      mocks.authSession.apiClient.request.mockImplementation((r) => {
+        if (r.path === "/me/platform-context")
+          return Promise.resolve(contextEnvelope("ACTIVE", 7));
+        if (r.path === "/platform/me/effective-access/decisions")
+          return Promise.resolve(
+            decisionEnvelope(
+              {
+                "audit.platform.read": false,
+                "platform_users.read": true,
+                "platform_users.manage": ++decisions === 1,
+                "platform_workspaces.manage": false,
+              },
+              7,
+              decisions === 1 ? "2026-10-09T08:01:00.000Z" : null,
+            ),
+          );
+        if (r.method === "POST") return late.promise;
+        if (r.path.endsWith("management-state"))
+          return ++managementReads === 1
+            ? Promise.resolve(management)
+            : late.promise;
+        return Promise.resolve(detail);
+      });
+      const client = testQueryClient();
+      renderShell(
+        client,
+        <PlatformUserDetail
+          userId={workspaceId}
+          locale="en"
+          labels={messages.en.platformUsers}
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Suspend access" }),
+      );
+      if (kind === "mutation")
+        fireEvent.click(screen.getByRole("dialog").querySelector("button")!);
+      else {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        void client.invalidateQueries({
+          queryKey: ["hassan-web", "platform-user-lifecycle"],
+        });
+        await settleAsyncQueries();
+      }
+      await timer.advanceBy(60_001);
+      await settleAsyncQueries();
+      expect(
+        screen.queryByRole("button", { name: "Suspend access" }),
+      ).toBeNull();
+      expect(
+        await screen.findByText("Independent readable member"),
+      ).toBeVisible();
+      await act(async () =>
+        late.resolve({
+          data: {
+            ...management.data,
+            platformMembership: {
+              ...management.data.platformMembership,
+              status: "ENDED",
+              version: 5,
+            },
+          },
+        }),
+      );
+      await settleAsyncQueries();
+      expect(screen.queryByText("Access changed.")).toBeNull();
+      expect(screen.queryByText("Ended", { exact: true })).toBeNull();
+      expect(mocks.authSession.logout).not.toHaveBeenCalled();
+    },
+  );
+  test("management 403 refresh preserves READ while authority rediscovery is pending", async () => {
+    mocks.pathname = `/platform/users/${workspaceId}`;
+    const lateDecisions = deferred<unknown>();
+    let decisions = 0;
+    const at = "2026-10-09T08:00:00.000Z";
+    mocks.authSession.apiClient.request.mockImplementation((r) => {
+      if (r.path === "/me/platform-context")
+        return Promise.resolve(contextEnvelope("ACTIVE", 7));
+      if (r.path === "/platform/me/effective-access/decisions")
+        return ++decisions === 1
+          ? Promise.resolve(
+              decisionEnvelope({
+                "audit.platform.read": false,
+                "platform_users.read": true,
+                "platform_users.manage": true,
+                "platform_workspaces.manage": false,
+              }),
+            )
+          : lateDecisions.promise;
+      if (r.method === "POST")
+        return Promise.reject(backendError("SUPPORT_ACCESS_FORBIDDEN", 403));
+      if (r.path.endsWith("management-state"))
+        return Promise.resolve({
+          data: {
+            userId: workspaceId,
+            platformMembership: {
+              id: workspaceId,
+              status: "ACTIVE",
+              version: 4,
+              suspendedAt: null,
+              endedAt: null,
+            },
+          },
+        });
+      return Promise.resolve({
+        data: {
+          id: workspaceId,
+          displayName: "Readable during refresh",
+          status: "ACTIVE",
+          createdAt: at,
+          updatedAt: at,
+          platformMembership: {
+            id: workspaceId,
+            status: "ACTIVE",
+            createdAt: at,
+            updatedAt: at,
+          },
+        },
+      });
+    });
+    renderShell(
+      testQueryClient(),
+      <PlatformUserDetail
+        userId={workspaceId}
+        locale="en"
+        labels={messages.en.platformUsers}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Suspend access" }),
+    );
+    fireEvent.click(screen.getByRole("dialog").querySelector("button")!);
+    await waitFor(() => expect(decisions).toBe(2));
+    expect(screen.getByText("Readable during refresh")).toBeVisible();
+    expect(screen.queryByText("Lifecycle management")).toBeNull();
+    await act(async () =>
+      lateDecisions.resolve(
+        decisionEnvelope({
+          "audit.platform.read": false,
+          "platform_users.read": true,
+          "platform_users.manage": false,
+          "platform_workspaces.manage": false,
+        }),
+      ),
+    );
+    expect(screen.getByText("Readable during refresh")).toBeVisible();
+    expect(mocks.authSession.logout).not.toHaveBeenCalled();
+    expect(mocks.authSession.markSessionExpired).not.toHaveBeenCalled();
+  });
   test.each(["directory", "detail"] as const)(
     "actual shell validUntil retires Users %s and suppresses late results",
     async (kind) => {
@@ -640,7 +825,7 @@ describe("Platform shell", () => {
     ).not.toBeInTheDocument();
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(3);
     expect(
-      screen.getByText("No Platform sections are available."),
+      await screen.findByText("No Platform sections are available."),
     ).toHaveAttribute("role", "status");
   });
 
@@ -833,7 +1018,7 @@ describe("Platform shell", () => {
     await timer.advanceBy(40 * 24 * 60 * 60 * 1_000 - maxSafeTimerDelay);
     await settleAsyncQueries();
     expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
-    expect(screen.getByText("Users")).toBeInTheDocument();
+    expect(await screen.findByText("Users")).toBeInTheDocument();
     expect(mocks.authSession.apiClient.request).toHaveBeenCalledTimes(3);
   });
 
@@ -1202,7 +1387,7 @@ function mockDecisions(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  > & { "subscriptions.read"?: boolean },
+  > & { "subscriptions.read"?: boolean; "platform_users.manage"?: boolean },
   accessVersion = 7,
   validUntil: string | null = null,
 ) {
@@ -1217,7 +1402,7 @@ function decisionEnvelope(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  > & { "subscriptions.read"?: boolean },
+  > & { "subscriptions.read"?: boolean; "platform_users.manage"?: boolean },
   accessVersion = 7,
   validUntil: string | null = null,
   membershipId = "platform_membership_a",
@@ -1228,6 +1413,9 @@ function decisionEnvelope(
       accessVersion,
       context: "PLATFORM",
       decisions: Object.entries({
+        ...(/^\/platform\/users\/[0-9a-f]{24}$/.test(mocks.pathname)
+          ? { "platform_users.manage": false }
+          : {}),
         ...(/^\/platform\/workspaces\/[0-9a-f]{24}$/.test(mocks.pathname)
           ? { "subscriptions.read": false }
           : {}),

@@ -145,7 +145,11 @@ function tree(
 beforeEach(() => {
   mocks.request.mockReset();
   mocks.expired.mockReset();
-  mocks.authority.allows.mockReset().mockReturnValue(true);
+  mocks.authority.allows
+    .mockReset()
+    .mockImplementation(
+      (permission?: string) => permission !== "platform_users.manage",
+    );
   mocks.authority.refresh.mockClear();
   mocks.authority.principalId = "principal";
   mocks.authority.sessionGeneration = 4;

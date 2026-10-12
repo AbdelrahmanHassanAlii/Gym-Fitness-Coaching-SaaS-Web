@@ -189,6 +189,51 @@ export const messages = {
     },
     platformUsers: {
       title: "أعضاء المنصة",
+      lifecycle: {
+        title: "إدارة دورة حياة العضوية",
+        status: "حالة العضوية",
+        suspendedAt: "تاريخ التعليق",
+        endedAt: "تاريخ الانتهاء",
+        loading: "جارٍ تحميل حالة الإدارة…",
+        changed: "تم تغيير الوصول.",
+        retry: "إعادة المحاولة",
+        cancel: "إلغاء",
+        actions: {
+          suspend: "تعليق الوصول",
+          reactivate: "إعادة تفعيل الوصول",
+          end: "إنهاء الوصول",
+        },
+        statuses: { ACTIVE: "نشطة", SUSPENDED: "معلقة", ENDED: "منتهية" },
+        confirmations: {
+          suspend: {
+            title: "تأكيد تعليق الوصول",
+            copy: "سيتوقف الوصول إلى المنصة. تبقى الصلاحيات والمنح المعيّنة محفوظة ويمكن إعادة تفعيل الوصول لاحقًا.",
+          },
+          reactivate: {
+            title: "تأكيد إعادة التفعيل",
+            copy: "سيصبح الوصول نشطًا مجددًا. تصبح ملفات الصلاحيات المعيّنة والمنح الحالية غير المنتهية مؤهلة مجددًا. يجب أن يكون حساب العضو نشطًا.",
+          },
+          end: {
+            title: "تأكيد إنهاء الوصول",
+            copy: "سينتهي الوصول إلى المنصة. تبقى العضوية والتعيينات محفوظة ويمكن إعادة تفعيل الوصول لاحقًا.",
+          },
+        },
+        errors: {
+          unavailable: "حالة الإدارة غير متاحة. حاول مرة أخرى.",
+          conflict: "تغير الوصول. راجع الحالة الحالية وأكّد الإجراء مجددًا.",
+          transition:
+            "هذا الإجراء غير متاح للحالة الحالية. تم طلب الحالة المحدثة.",
+          inactive: "حساب العضو غير نشط حاليًا ولا يمكن إعادة تفعيل الوصول.",
+          lockout:
+            "لا يمكن إكمال الإجراء لأن الوصول المطلوب لإدارة المنصة يجب أن يبقى متاحًا.",
+          evaluation:
+            "تعذر تقييم إجراء الإدارة بأمان. حاول مجددًا أو تواصل مع مسؤول.",
+          self: "إدارة وصولك الشخصي غير مسموحة.",
+          processing: "الطلب قيد المعالجة. أعد المحاولة للتحقق من نفس الطلب.",
+          keyReused:
+            "تعذر إعادة استخدام الطلب. راجع الحالة وابدأ إجراءً جديدًا.",
+        },
+      },
       scope: "يعرض هذا الدليل أعضاء المنصة، وليس جميع حسابات النظام.",
       columns: {
         name: "الاسم",
@@ -1532,6 +1577,54 @@ export const messages = {
     },
     platformUsers: {
       title: "Platform Members",
+      lifecycle: {
+        title: "Lifecycle management",
+        status: "Membership status",
+        suspendedAt: "Suspended at",
+        endedAt: "Ended at",
+        loading: "Loading management state…",
+        changed: "Access changed.",
+        retry: "Retry",
+        cancel: "Cancel",
+        actions: {
+          suspend: "Suspend access",
+          reactivate: "Reactivate access",
+          end: "End access",
+        },
+        statuses: { ACTIVE: "Active", SUSPENDED: "Suspended", ENDED: "Ended" },
+        confirmations: {
+          suspend: {
+            title: "Confirm suspension",
+            copy: "Platform access stops. Assigned permissions and grants remain stored, and access may later be reactivated.",
+          },
+          reactivate: {
+            title: "Confirm reactivation",
+            copy: "Access becomes active again. Existing assigned profiles and current unexpired grants become eligible again. The member’s account must be ACTIVE.",
+          },
+          end: {
+            title: "Confirm ending access",
+            copy: "Platform access ends. The membership and existing assignments remain stored, and access may later be reactivated.",
+          },
+        },
+        errors: {
+          unavailable: "Management state unavailable. Try again.",
+          conflict:
+            "Access changed. Review the current state and confirm the action again.",
+          transition:
+            "This action is unavailable for the current state. Updated state has been requested.",
+          inactive:
+            "The member’s account is not currently active and cannot be reactivated.",
+          lockout:
+            "This action cannot be completed because required Platform management access must remain available.",
+          evaluation:
+            "The management action could not be safely evaluated. Try again or contact an administrator.",
+          self: "Self-management is not allowed.",
+          processing:
+            "Request already processing. Retry to check the same request.",
+          keyReused:
+            "This request could not be reused. Review the state and start a new action.",
+        },
+      },
       scope: "This directory lists Platform members, not all system accounts.",
       columns: {
         name: "Name",

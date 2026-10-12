@@ -10,6 +10,7 @@ export const platformMembershipStatuses = [
 export const platformFoundationPermissions = [
   "audit.platform.read",
   "platform_users.read",
+  "platform_users.manage",
   "platform_workspaces.manage",
   "subscriptions.read",
 ] as const;

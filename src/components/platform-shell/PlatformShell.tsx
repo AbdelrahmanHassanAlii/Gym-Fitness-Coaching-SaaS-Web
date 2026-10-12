@@ -18,6 +18,7 @@ import {
   platformAccessKeys,
   platformDecisionRequests,
   platformWorkspaceDecisionRequests,
+  platformUserManagementDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
@@ -91,7 +92,9 @@ export function PlatformShell({
     pathname,
   )
     ? platformWorkspaceDecisionRequests
-    : platformDecisionRequests;
+    : /^\/platform\/users\/[0-9a-f]{24}$/.test(pathname)
+      ? platformUserManagementDecisionRequests
+      : platformDecisionRequests;
   const { apiClient, generation, logout, markSessionExpired, state } =
     useAuthSession();
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -284,19 +287,16 @@ export function PlatformShell({
       : "";
   const direction = getLocaleDirection(locale);
   const refreshAuthority = async () => {
-    setRecovering(true);
-    try {
-      const refreshedContext = await refetchContext();
-      if (
-        refreshedContext.data?.membership.status === "ACTIVE" &&
-        refreshedContext.data.membership.id === activeMembership!.id &&
-        refreshedContext.data.membership.accessVersion ===
-          activeMembership!.accessVersion
-      ) {
-        await refetchDecisions();
-      }
-    } finally {
-      setRecovering(false);
+    // Keep independently readable children mounted during background rediscovery.
+    // Updated context/decisions still retire authority through the normal shell gates.
+    const refreshedContext = await refetchContext();
+    if (
+      refreshedContext.data?.membership.status === "ACTIVE" &&
+      refreshedContext.data.membership.id === activeMembership!.id &&
+      refreshedContext.data.membership.accessVersion ===
+        activeMembership!.accessVersion
+    ) {
+      await refetchDecisions();
     }
   };
   const authority = {

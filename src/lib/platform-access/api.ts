@@ -19,13 +19,21 @@ const platformMembershipStatusSet = new Set<string>(platformMembershipStatuses);
 
 export const platformDecisionRequests = Object.freeze(
   platformFoundationPermissions
-    .filter((permission) => permission !== "subscriptions.read")
+    .filter(
+      (permission) =>
+        permission !== "subscriptions.read" &&
+        permission !== "platform_users.manage",
+    )
     .map((permission) => Object.freeze({ permission })),
 ) satisfies readonly PlatformDecisionRequestDto[];
 
 export const platformWorkspaceDecisionRequests = Object.freeze([
   ...platformDecisionRequests,
   Object.freeze({ permission: "subscriptions.read" as const }),
+]);
+export const platformUserManagementDecisionRequests = Object.freeze([
+  ...platformDecisionRequests,
+  Object.freeze({ permission: "platform_users.manage" as const }),
 ]);
 
 export async function requestPlatformContext(

@@ -18,6 +18,7 @@ import {
   membershipStatuses,
   platformUserKeys,
 } from "@/lib/platform-users";
+import { PlatformUserLifecycle } from "./PlatformUserLifecycle";
 import styles from "./platform-user-detail.module.css";
 
 export type PlatformUserLabels = ReturnType<
@@ -187,6 +188,11 @@ export function PlatformUserDetail({
           {timestamp(labels.fields.endedAt, member.endedAt)}
         </dl>
       </section>
+      <PlatformUserLifecycle
+        userId={userId}
+        locale={locale}
+        labels={labels.lifecycle}
+      />
       <p>{labels.dateTimeZone}</p>
     </article>
   );
