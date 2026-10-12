@@ -18,6 +18,7 @@ import {
   membershipStatuses,
   platformUserKeys,
 } from "@/lib/platform-users";
+import { PlatformProfileAssignment } from "./PlatformProfileAssignment";
 import { PlatformUserLifecycle } from "./PlatformUserLifecycle";
 import styles from "./platform-user-detail.module.css";
 
@@ -34,6 +35,8 @@ export function PlatformUserDetail({
   locale: Locale;
   userId: string;
 }) {
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const authority = usePlatformAuthority();
   const { apiClient, markSessionExpired } = useAuthSession();
   const client = useQueryClient();
@@ -191,7 +194,17 @@ export function PlatformUserDetail({
       <PlatformUserLifecycle
         userId={userId}
         locale={locale}
+        externalBusy={assignmentBusy}
+        onBusyChange={setLifecycleBusy}
         labels={labels.lifecycle}
+      />
+      <PlatformProfileAssignment
+        userId={userId}
+        targetName={user.displayName ?? labels.nameUnavailable}
+        accountActive={user.status === "ACTIVE"}
+        locale={locale}
+        externalBusy={lifecycleBusy}
+        onBusyChange={setAssignmentBusy}
       />
       <p>{labels.dateTimeZone}</p>
     </article>

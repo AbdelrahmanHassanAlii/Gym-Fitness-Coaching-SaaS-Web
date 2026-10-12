@@ -23,6 +23,7 @@ import {
   type ManagementState,
 } from "@/lib/platform-users/lifecycle";
 import { useProtectedAsyncEpoch } from "@/lib/platform-workspaces/use-protected-async-epoch";
+import { sameTargetManagement } from "@/lib/platform-users/profile-assignment";
 import styles from "./platform-user-lifecycle.module.css";
 
 type Labels = ReturnType<typeof getMessages>["platformUsers"]["lifecycle"];
@@ -41,10 +42,14 @@ export function PlatformUserLifecycle({
   userId,
   locale,
   labels,
+  externalBusy = false,
+  onBusyChange,
 }: {
   userId: string;
   locale: Locale;
   labels: Labels;
+  externalBusy?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const authority = usePlatformAuthority();
   const key = managementKey(authority, userId);
@@ -59,6 +64,8 @@ export function PlatformUserLifecycle({
       userId={userId}
       locale={locale}
       labels={labels}
+      externalBusy={externalBusy}
+      onBusyChange={onBusyChange}
     />
   );
 }
@@ -67,10 +74,14 @@ function LifecycleCard({
   userId,
   locale,
   labels,
+  externalBusy = false,
+  onBusyChange,
 }: {
   userId: string;
   locale: Locale;
   labels: Labels;
+  externalBusy?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const authority = usePlatformAuthority();
   const { apiClient, markSessionExpired } = useAuthSession();
@@ -88,6 +99,10 @@ function LifecycleCard({
   const [message, setMessage] = useState<{ error?: string; success?: string }>(
     {},
   );
+  useEffect(() => {
+    onBusyChange?.(pending || !!intent);
+    return () => onBusyChange?.(false);
+  }, [pending, intent, onBusyChange]);
   const busy = useRef(false);
   const generation = useRef(0);
   const panel = useRef<HTMLDivElement>(null);
@@ -211,8 +226,16 @@ function LifecycleCard({
     query.queryKey[2] === "detail" &&
     (query.queryKey[3] as { userId?: string })?.userId === userId;
   async function refresh() {
+    await client.cancelQueries({
+      queryKey: ["hassan-web", "platform-profile-assignment"],
+      predicate: (query) => sameTargetManagement(query, authority, userId),
+    });
     await Promise.all([
       state.refetch(),
+      client.invalidateQueries({
+        queryKey: ["hassan-web", "platform-profile-assignment"],
+        predicate: (query) => sameTargetManagement(query, authority, userId),
+      }),
       client.invalidateQueries({
         queryKey: platformUserKeys.all,
         predicate: (query) =>
@@ -222,7 +245,7 @@ function LifecycleCard({
     ]);
   }
   async function run(next: Intent) {
-    if (busy.current || denied || self) return;
+    if (busy.current || denied || self || externalBusy) return;
     const captured = epoch.capture(),
       request = ++generation.current;
     if (!current(captured, request)) return;
@@ -365,7 +388,7 @@ function LifecycleCard({
                   (command) => (
                     <button
                       key={command}
-                      disabled={pending || !!intent}
+                      disabled={pending || !!intent || externalBusy}
                       type="button"
                       onClick={(event) => {
                         trigger.current = event.currentTarget;
@@ -389,7 +412,7 @@ function LifecycleCard({
         {intent ? (
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || externalBusy}
             onClick={() => void run(intent)}
           >
             {labels.retry}
@@ -422,7 +445,7 @@ function LifecycleCard({
             <div className={styles.actions}>
               <button
                 type="button"
-                disabled={pending}
+                disabled={pending || externalBusy}
                 onClick={() => {
                   if (busy.current) return;
                   void run({
@@ -435,7 +458,11 @@ function LifecycleCard({
               >
                 {labels.actions[dialog]}
               </button>
-              <button type="button" disabled={pending} onClick={close}>
+              <button
+                type="button"
+                disabled={pending || externalBusy}
+                onClick={close}
+              >
                 {labels.cancel}
               </button>
             </div>

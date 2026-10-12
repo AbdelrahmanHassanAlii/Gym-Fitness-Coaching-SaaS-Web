@@ -74,6 +74,100 @@ vi.mock("next/navigation", () => ({
 const maxSafeTimerDelay = 2_147_483_647;
 
 describe("Platform shell", () => {
+  test("profile management expiry closes the editor while independently renewed READ survives", async () => {
+    const timer = installPlatformTimerHarness("2026-10-09T08:00:00.000Z");
+    mocks.pathname = `/platform/users/${workspaceId}`;
+    const at = "2026-10-09T08:00:00.000Z";
+    let decisions = 0;
+    mocks.authSession.apiClient.request.mockImplementation(async (r) => {
+      if (r.path === "/me/platform-context")
+        return contextEnvelope("ACTIVE", 7);
+      if (r.path === "/platform/me/effective-access/decisions") {
+        expect(
+          r.body.requests.map((p: { permission: string }) => p.permission),
+        ).toContain("platform_permissions.manage");
+        return decisionEnvelope(
+          {
+            "audit.platform.read": false,
+            "platform_users.read": true,
+            "platform_users.manage": false,
+            "platform_permissions.manage": ++decisions === 1,
+            "platform_workspaces.manage": false,
+          },
+          7,
+          decisions === 1 ? "2026-10-09T08:01:00.000Z" : null,
+        );
+      }
+      if (r.path.endsWith("permission-profile-assignment"))
+        return {
+          data: {
+            userId: workspaceId,
+            platformMembership: {
+              id: workspaceId,
+              status: "ACTIVE",
+              version: 4,
+            },
+            permissionProfiles: [],
+          },
+        };
+      if (r.path.endsWith("permission-profile-selector"))
+        return {
+          data: {
+            permissionProfiles: [{ id: workspaceId, name: "Assignable" }],
+            nextCursor: null,
+          },
+        };
+      return {
+        data: {
+          id: workspaceId,
+          displayName: "Independent readable member",
+          status: "ACTIVE",
+          createdAt: at,
+          updatedAt: at,
+          platformMembership: {
+            id: workspaceId,
+            status: "ACTIVE",
+            createdAt: at,
+            updatedAt: at,
+          },
+        },
+      };
+    });
+    const client = testQueryClient();
+    renderShell(
+      client,
+      <PlatformUserDetail
+        userId={workspaceId}
+        locale="en"
+        labels={messages.en.platformUsers}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit assignment" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Assignable" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await timer.advanceBy(60_001);
+    await settleAsyncQueries();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Permission profiles",
+      }),
+    ).toBeNull();
+    expect(
+      await screen.findByText("Independent readable member"),
+    ).toBeVisible();
+    expect(
+      client
+        .getQueryCache()
+        .findAll({ queryKey: ["hassan-web", "platform-profile-assignment"] }),
+    ).toHaveLength(0);
+    expect(mocks.authSession.logout).not.toHaveBeenCalled();
+  });
   test.each(["GET", "mutation"])(
     "actual shell expiry retires lifecycle and ignores late %s while READ is renewed",
     async (kind) => {
@@ -1387,7 +1481,11 @@ function mockDecisions(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  > & { "subscriptions.read"?: boolean; "platform_users.manage"?: boolean },
+  > & {
+    "subscriptions.read"?: boolean;
+    "platform_users.manage"?: boolean;
+    "platform_permissions.manage"?: boolean;
+  },
   accessVersion = 7,
   validUntil: string | null = null,
 ) {
@@ -1402,7 +1500,11 @@ function decisionEnvelope(
     | "platform_users.read"
     | "platform_workspaces.manage",
     boolean
-  > & { "subscriptions.read"?: boolean; "platform_users.manage"?: boolean },
+  > & {
+    "subscriptions.read"?: boolean;
+    "platform_users.manage"?: boolean;
+    "platform_permissions.manage"?: boolean;
+  },
   accessVersion = 7,
   validUntil: string | null = null,
   membershipId = "platform_membership_a",
@@ -1414,7 +1516,10 @@ function decisionEnvelope(
       context: "PLATFORM",
       decisions: Object.entries({
         ...(/^\/platform\/users\/[0-9a-f]{24}$/.test(mocks.pathname)
-          ? { "platform_users.manage": false }
+          ? {
+              "platform_users.manage": false,
+              "platform_permissions.manage": false,
+            }
           : {}),
         ...(/^\/platform\/workspaces\/[0-9a-f]{24}$/.test(mocks.pathname)
           ? { "subscriptions.read": false }
