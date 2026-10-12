@@ -295,6 +295,7 @@ function LifecycleCard({
         error.kind === "network" ||
         error.kind === "abort" ||
         error.kind === "malformed-response" ||
+        error.kind === "non-json-response" ||
         (error.status !== undefined && error.status >= 500) ||
         code === "IDEMPOTENCY_REQUEST_IN_PROGRESS";
       setIntent(uncertain ? next : undefined);

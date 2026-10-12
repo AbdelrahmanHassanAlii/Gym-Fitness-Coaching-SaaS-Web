@@ -9,7 +9,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, test, vi } from "vitest";
 import { messages } from "@/i18n/messages";
-import { ApiError } from "@/lib/api";
+import { ApiError, createApiClient } from "@/lib/api";
 import { platformUserKeys } from "@/lib/platform-users";
 import { PlatformUserLifecycle } from "./PlatformUserLifecycle";
 import { PlatformUserDetail } from "./PlatformUserDetail";
@@ -250,6 +250,74 @@ test.each(["suspend", "reactivate", "end"] as const)(
     ).toHaveLength(destination === "ACTIVE" ? 3 : 2);
   },
 );
+test.each(["suspend", "reactivate", "end"] as const)(
+  "%s HTTP 200 non-JSON retains exact intent until controlled retry",
+  async (command) => {
+    const source = command === "reactivate" ? "ENDED" : "ACTIVE";
+    const destination =
+      command === "suspend"
+        ? "SUSPENDED"
+        : command === "end"
+          ? "ENDED"
+          : "ACTIVE";
+    let attempts = 0;
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (_url, options) => {
+        if (options?.method === "POST" && ++attempts === 1)
+          return new Response("Command accepted", {
+            status: 200,
+            headers: { "content-type": "text/plain" },
+          });
+        return new Response(
+          JSON.stringify(
+            fact(attempts > 1 ? destination : source, attempts > 1 ? 5 : 4),
+          ),
+          { headers: { "content-type": "application/json" } },
+        );
+      });
+    const api = createApiClient({
+      baseUrl: "https://example.test/api/v1",
+      fetch: fetchImpl,
+    });
+    mocks.request.mockImplementation((request) => api.request(request));
+    mount();
+    await confirm(command);
+    const retry = await screen.findByRole("button", { name: labels.retry });
+    expect(await screen.findByText(labels.errors.unavailable)).toBeVisible();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    for (const button of screen.getAllByRole("button")) {
+      if (button !== retry) {
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+    }
+    const posts = () =>
+      fetchImpl.mock.calls.filter(([, options]) => options?.method === "POST");
+    expect(posts()).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // GET + POST; no automatic replay/refetch.
+    const first = posts()[0];
+    expect(first[0].toString()).toBe(
+      `https://example.test/api/v1/platform/users/${id}/${command}`,
+    );
+    expect(first[1]?.body).toBe(JSON.stringify({ expectedVersion: 4 }));
+    const originalKey = new Headers(first[1]?.headers).get("Idempotency-Key");
+    expect(originalKey).toBeTruthy();
+    expect(screen.getByText(labels.statuses[source])).toBeVisible();
+    fireEvent.click(retry);
+    await screen.findByText(labels.changed);
+    expect(posts()).toHaveLength(2);
+    const second = posts()[1];
+    expect(second[0]).toEqual(first[0]);
+    expect(second[1]?.body).toBe(first[1]?.body);
+    expect(new Headers(second[1]?.headers).get("Idempotency-Key")).toBe(
+      originalKey,
+    );
+    expect(screen.queryByRole("button", { name: labels.retry })).toBeNull();
+    expect(screen.getByText(labels.statuses[destination])).toBeVisible();
+  },
+);
+
 test("pending blocks double confirm and all competing commands, traps focus", async () => {
   const late = deferred();
   mocks.request.mockImplementation((r) =>
