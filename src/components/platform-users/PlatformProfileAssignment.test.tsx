@@ -8,12 +8,13 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, test, vi } from "vitest";
-import { ApiError } from "@/lib/api";
+import { ApiError, createApiClient, type ApiClient } from "@/lib/api";
 import { messages } from "@/i18n/messages";
 import { getProfileAssignmentMessages } from "@/i18n/profile-assignment";
 import { PlatformProfileAssignment } from "./PlatformProfileAssignment";
 import { PlatformUserDetail } from "./PlatformUserDetail";
 const mocks = vi.hoisted(() => ({
+  realClient: undefined as ApiClient | undefined,
   request: vi.fn(),
   refresh: vi.fn(async () => {}),
   expired: vi.fn(),
@@ -26,7 +27,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/auth", () => ({
   useAuthSession: () => ({
-    apiClient: { request: mocks.request },
+    apiClient: mocks.realClient ?? { request: mocks.request },
     markSessionExpired: mocks.expired,
   }),
 }));
@@ -98,6 +99,7 @@ function deferred() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.realClient = undefined;
   mocks.read = true;
   mocks.manage = true;
   mocks.lifecycle = false;
@@ -164,6 +166,235 @@ beforeEach(() => {
     };
   });
 });
+test("membership rejection recovers after lifecycle reactivation without remount; next save uses fresh version and new key", async () => {
+  mocks.lifecycle = true;
+  const original = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation(async (r) => {
+    if (r.method === "PUT" && puts().length === 1) {
+      status = "SUSPENDED";
+      version = 5;
+      throw backend("PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE");
+    }
+    if (r.method === "POST" && r.path.endsWith("/reactivate")) {
+      status = "ACTIVE";
+      version = 6;
+      return {
+        data: {
+          userId: target,
+          platformMembership: {
+            id: other,
+            status,
+            version,
+            suspendedAt: null,
+            endedAt: null,
+          },
+        },
+      };
+    }
+    return original(r);
+  });
+  mount(true);
+  await edit();
+  const cardHeading = screen.getByRole("heading", { name: labels.title });
+  await confirm();
+  await screen.findAllByText(labels.inactive);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(screen.queryByRole("button", { name: labels.retryIntent })).toBeNull();
+  const reactivate = messages.en.platformUsers.lifecycle.actions.reactivate;
+  fireEvent.click(await screen.findByRole("button", { name: reactivate }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: reactivate,
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: labels.edit })).toBeEnabled(),
+  );
+  expect(screen.getByRole("heading", { name: labels.title })).toBe(cardHeading);
+  await edit();
+  await confirm();
+  await screen.findByText(labels.changed);
+  expect(puts()).toHaveLength(2);
+  expect(puts()[0].body.expectedVersion).toBe(4);
+  expect(puts()[1].body.expectedVersion).toBe(6);
+  expect(puts()[1].idempotencyKey).not.toBe(puts()[0].idempotencyKey);
+});
+test("account block survives ACTIVE assignment and manual READ patches; only fresh account ACTIVE GET restores editing", async () => {
+  const original = mocks.request.getMockImplementation()!,
+    freshRead = deferred();
+  let readCount = 0,
+    accountStatus = "SUSPENDED";
+  mocks.request.mockImplementation(async (r) => {
+    if (r.method === "PUT")
+      throw backend("PLATFORM_MEMBERSHIP_TARGET_ACCOUNT_INACTIVE");
+    if (r.path === `/platform/users/${target}`) {
+      const value = await original(r);
+      if (++readCount === 2) return freshRead.promise;
+      return readCount > 2
+        ? { data: { ...value.data, status: accountStatus } }
+        : value;
+    }
+    return original(r);
+  });
+  const mounted = mount(true);
+  await edit();
+  const heading = screen.getByRole("heading", { name: labels.title });
+  await confirm();
+  await waitFor(() => expect(readCount).toBe(2));
+  expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
+  expect(
+    mounted.client.getQueryCache().findAll({
+      queryKey: ["hassan-web", "platform-profile-assignment", "state"],
+    })[0].state.data,
+  ).toMatchObject({ platformMembership: { status: "ACTIVE" } });
+  const readKey = mounted.client.getQueryCache().findAll({
+    queryKey: ["hassan-web", "platform-users", "detail"],
+  })[0].queryKey;
+  const value = await original({
+    method: "GET",
+    path: `/platform/users/${target}`,
+  });
+  await act(async () =>
+    freshRead.resolve({ data: { ...value.data, status: "SUSPENDED" } }),
+  );
+  await waitFor(() =>
+    expect(screen.getAllByText(labels.inactive).length).toBeGreaterThan(0),
+  );
+  await act(async () => mounted.client.setQueryData(readKey, value.data));
+  expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
+  accountStatus = "ACTIVE";
+  await act(async () => {
+    await mounted.client.refetchQueries({ queryKey: readKey, exact: true });
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: labels.edit })).toBeEnabled(),
+  );
+  expect(screen.getByRole("heading", { name: labels.title })).toBe(heading);
+  expect(screen.queryByRole("button", { name: labels.retryIntent })).toBeNull();
+});
+test("late old-principal account recovery cannot clear the current principal's block", async () => {
+  const original = mocks.request.getMockImplementation()!,
+    oldRead = deferred(),
+    newRead = deferred();
+  let readCount = 0;
+  mocks.request.mockImplementation(async (r) => {
+    if (r.method === "PUT")
+      throw backend("PLATFORM_MEMBERSHIP_TARGET_ACCOUNT_INACTIVE");
+    if (r.path === `/platform/users/${target}`) {
+      readCount++;
+      if (readCount === 2) return oldRead.promise;
+      if (readCount === 4) return newRead.promise;
+    }
+    return original(r);
+  });
+  const mounted = mount(true);
+  await edit();
+  await confirm();
+  await waitFor(() => expect(readCount).toBe(2));
+  mocks.principal = other;
+  mocks.generation++;
+  mounted.rerender(mounted.tree());
+  await edit();
+  await confirm();
+  await waitFor(() => expect(readCount).toBe(4));
+  const value = await original({
+    method: "GET",
+    path: `/platform/users/${target}`,
+  });
+  await act(async () => oldRead.resolve(value));
+  expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
+  await act(async () => newRead.resolve(value));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: labels.edit })).toBeEnabled(),
+  );
+});
+test("real createApiClient TypeError is uncertain; explicit retry reuses exact wire intent then clears it", async () => {
+  const original = mocks.request.getMockImplementation()!;
+  const writes: {
+    target: string;
+    body: string;
+    key: string | null;
+    method: string;
+  }[] = [];
+  const fetcher = Object.assign(
+    vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+      const url = new URL(input.toString()),
+        path = url.pathname.replace("/api/v1", "");
+      if (options?.method === "PUT") {
+        writes.push({
+          target: url.toString(),
+          body: String(options.body),
+          key: new Headers(options.headers).get("Idempotency-Key"),
+          method: options.method,
+        });
+        if (writes.length === 1)
+          throw new TypeError("network disconnected after send");
+      }
+      const value = await original({
+        method: options?.method ?? "GET",
+        path,
+        body: options?.body ? JSON.parse(String(options.body)) : undefined,
+      });
+      return Response.json(value);
+    }),
+    { preconnect: () => {} },
+  );
+  mocks.realClient = createApiClient({
+    baseUrl: "https://example.test/api/v1",
+    fetch: fetcher,
+  });
+  mount();
+  await edit();
+  await confirm();
+  await screen.findByText(labels.uncertain);
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(writes[0].body)).toEqual({
+    expectedVersion: 4,
+    profileIds: [a, b],
+  });
+  expect(writes[0].target).toBe(
+    `https://example.test/api/v1/platform/users/${target}/permission-profile-assignment`,
+  );
+  expect(writes[0].key).toBeTruthy();
+  expect(screen.getByRole("button", { name: labels.edit })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: labels.retryIntent }));
+  await screen.findByText(labels.changed);
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
+  expect(screen.queryByRole("button", { name: labels.retryIntent })).toBeNull();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+});
+test.each(["fresh", "deny", "expiry"])(
+  "membership recovery waits for fresh GET and preserves %s authority precedence",
+  async (outcome) => {
+    const fresh = deferred(),
+      original = mocks.request.getMockImplementation()!;
+    let reads = 0;
+    mocks.request.mockImplementation(async (r) => {
+      if (r.method === "PUT")
+        throw backend("PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE");
+      if (r.path.endsWith("permission-profile-assignment") && ++reads === 2)
+        return fresh.promise;
+      return original(r);
+    });
+    const mounted = mount();
+    await edit();
+    await confirm();
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
+    if (outcome === "deny") mocks.manage = false;
+    if (outcome === "expiry") mocks.validUntil = "2000-01-01T00:00:00.000Z";
+    if (outcome !== "fresh") mounted.rerender(mounted.tree());
+    await act(async () => fresh.resolve(fact()));
+    if (outcome === "fresh")
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: labels.edit })).toBeEnabled(),
+      );
+    else expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
+    expect(puts()).toHaveLength(1);
+  },
+);
 function mount(
   detail = false,
   locale: "en" | "ar" = "en",
@@ -354,7 +585,11 @@ test.each([
   async (code, label, http) => {
     const original = mocks.request.getMockImplementation()!;
     mocks.request.mockImplementation(async (r) => {
-      if (r.method === "PUT") throw backend(code, http);
+      if (r.method === "PUT") {
+        if (code === "PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE")
+          status = "SUSPENDED";
+        throw backend(code, http);
+      }
       return original(r);
     });
     mount();

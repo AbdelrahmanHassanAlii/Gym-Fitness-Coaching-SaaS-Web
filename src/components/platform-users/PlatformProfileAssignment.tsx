@@ -11,6 +11,11 @@ import { getProfileAssignmentMessages } from "@/i18n/profile-assignment";
 import { createIdempotencyKey, isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
 import { usePlatformAuthority } from "@/lib/platform-access";
+import {
+  platformUserAuthorityIdentity,
+  platformUserKeys,
+} from "@/lib/platform-users/query-keys";
+import type { PlatformUserDetail } from "@/lib/platform-users/contracts";
 import { useProtectedAsyncEpoch } from "@/lib/platform-workspaces/use-protected-async-epoch";
 import {
   assignmentPath,
@@ -22,6 +27,7 @@ import {
   sameTargetManagement,
   selectorPagesValid,
   type AssignmentIntent,
+  type AssignmentState,
 } from "@/lib/platform-users/profile-assignment";
 import styles from "./platform-user-lifecycle.module.css";
 import listStyles from "./platform-profile-assignment.module.css";
@@ -133,10 +139,49 @@ function AssignmentCard({
   ].sort(
     (a, b) => a.name.localeCompare(b.name, locale) || a.id.localeCompare(b.id),
   );
-  const [targetBlocked, setTargetBlocked] = useState(false);
+  type Recovery = "NONE" | "MEMBERSHIP" | "ACCOUNT";
+  const [recoveryBlock, setRecoveryBlock] = useState<Recovery>("NONE");
+  const recovery = useRef<Recovery>("NONE");
+  const readIdentity = JSON.stringify(
+    platformUserKeys.detail({
+      ...platformUserAuthorityIdentity(authority),
+      userId,
+    }),
+  );
+  useEffect(() => {
+    const captured = epoch.capture();
+    return client.getQueryCache().subscribe((event) => {
+      // Only a successful GET is recovery evidence. Lifecycle cache patches are not.
+      if (
+        event.type !== "updated" ||
+        event.action.type !== "success" ||
+        event.action.manual ||
+        !epoch.isCurrent(captured) ||
+        (authority.validUntil !== null &&
+          authorityExpired(authority.validUntil))
+      )
+        return;
+      const queryIdentity = JSON.stringify(event.query.queryKey);
+      const membershipRecovered =
+        recovery.current === "MEMBERSHIP" &&
+        queryIdentity === identity &&
+        client.getQueryData<AssignmentState>(event.query.queryKey)
+          ?.platformMembership.status === "ACTIVE";
+      const accountRecovered =
+        recovery.current === "ACCOUNT" &&
+        queryIdentity === readIdentity &&
+        client.getQueryData<PlatformUserDetail>(event.query.queryKey)
+          ?.status === "ACTIVE";
+      if (membershipRecovered || accountRecovered) {
+        recovery.current = "NONE";
+        setRecoveryBlock("NONE");
+        setMessage({});
+      }
+    });
+  }, [client, epoch, identity, readIdentity, authority.validUntil]);
   const inactive =
     !accountActive ||
-    targetBlocked ||
+    recoveryBlock !== "NONE" ||
     state.data?.platformMembership.status !== "ACTIVE";
   const retire = useCallback(() => {
     epoch.invalidate();
@@ -245,7 +290,7 @@ function AssignmentCard({
     document.addEventListener("keydown", keyboard);
     return () => document.removeEventListener("keydown", keyboard);
   }, [dialog, close]);
-  async function refreshStates() {
+  async function refreshStates(refreshAccount = false) {
     // Cancel even an initial peer-card GET so an old response cannot satisfy refresh.
     await client.cancelQueries({
       queryKey: ["hassan-web", "platform-user-lifecycle"],
@@ -257,6 +302,17 @@ function AssignmentCard({
         queryKey: ["hassan-web", "platform-user-lifecycle"],
         predicate: (q) => sameTargetManagement(q, authority, userId),
       }),
+      ...(refreshAccount
+        ? [
+            client.refetchQueries({
+              queryKey: platformUserKeys.detail({
+                ...platformUserAuthorityIdentity(authority),
+                userId,
+              }),
+              exact: true,
+            }),
+          ]
+        : []),
     ]);
   }
   async function run(next: AssignmentIntent) {
@@ -320,11 +376,27 @@ function AssignmentCard({
         setDraft([]);
         if (code === "PLATFORM_PERMISSION_SELF_MUTATION_FORBIDDEN")
           setSelfBlocked(true);
-        if (
-          code === "PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE" ||
-          code === "PLATFORM_MEMBERSHIP_TARGET_ACCOUNT_INACTIVE"
-        )
-          setTargetBlocked(true);
+        const recoveryKind: Recovery =
+          code === "PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE"
+            ? "MEMBERSHIP"
+            : code === "PLATFORM_MEMBERSHIP_TARGET_ACCOUNT_INACTIVE"
+              ? "ACCOUNT"
+              : "NONE";
+        if (recoveryKind !== "NONE") {
+          // Retire earlier GETs before accepting fresh recovery evidence.
+          await client.cancelQueries({ queryKey: key, exact: true });
+          if (recoveryKind === "ACCOUNT")
+            await client.cancelQueries({
+              queryKey: platformUserKeys.detail({
+                ...platformUserAuthorityIdentity(authority),
+                userId,
+              }),
+              exact: true,
+            });
+          if (!current(captured, request)) return;
+          recovery.current = recoveryKind;
+          setRecoveryBlock(recoveryKind);
+        }
         const errors: Record<string, string> = {
           PLATFORM_MEMBERSHIP_VERSION_CONFLICT: labels.conflict,
           PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE: labels.inactive,
@@ -338,9 +410,13 @@ function AssignmentCard({
           PERMISSION_PROFILE_DUPLICATE: labels.validation,
           PERMISSION_PROFILE_NOT_FOUND: labels.validation,
         };
-        await refreshStates();
+        await refreshStates(recoveryKind === "ACCOUNT");
         if (current(captured, request))
-          setMessage({ error: (code && errors[code]) || labels.failed });
+          setMessage(
+            recoveryKind !== "NONE" && recovery.current === "NONE"
+              ? {}
+              : { error: (code && errors[code]) || labels.failed },
+          );
       }
     } finally {
       if (current(captured, request)) {

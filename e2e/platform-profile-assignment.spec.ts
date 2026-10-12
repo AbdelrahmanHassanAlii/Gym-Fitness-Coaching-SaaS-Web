@@ -6,8 +6,12 @@ const actor = "68e7a9d10d56fd2b98d4a100",
   alpha = "68e7a9d10d56fd2b98d4a110",
   beta = "68e7a9d10d56fd2b98d4a111",
   at = "2026-10-11T10:00:00.000Z";
-async function platform(page: Page, failure?: "conflict" | "denied") {
+async function platform(
+  page: Page,
+  failure?: "conflict" | "denied" | "inactive",
+) {
   let version = 4,
+    membershipStatus = "ACTIVE",
     assigned = [alpha],
     retired = false;
   const writes: { body: unknown; key?: string }[] = [];
@@ -19,7 +23,7 @@ async function platform(page: Page, failure?: "conflict" | "denied") {
     const assignment = () => ({
       data: {
         userId: target,
-        platformMembership: { id: member, status: "ACTIVE", version },
+        platformMembership: { id: member, status: membershipStatus, version },
         permissionProfiles: assigned.map((id) => ({
           id,
           name: id === alpha ? "Alpha" : "Beta",
@@ -84,21 +88,37 @@ async function platform(page: Page, failure?: "conflict" | "denied") {
           updatedAt: at,
           platformMembership: {
             id: member,
-            status: "ACTIVE",
+            status: membershipStatus,
             createdAt: at,
             updatedAt: at,
           },
         },
       };
-    else if (path.endsWith("/management-state"))
+    else if (path.endsWith("/reactivate") && request.method() === "POST") {
+      expect(request.postDataJSON()).toEqual({ expectedVersion: 5 });
+      membershipStatus = "ACTIVE";
+      version = 6;
       json = {
         data: {
           userId: target,
           platformMembership: {
             id: member,
-            status: "ACTIVE",
+            status: membershipStatus,
             version,
             suspendedAt: null,
+            endedAt: null,
+          },
+        },
+      };
+    } else if (path.endsWith("/management-state"))
+      json = {
+        data: {
+          userId: target,
+          platformMembership: {
+            id: member,
+            status: membershipStatus,
+            version,
+            suspendedAt: membershipStatus === "SUSPENDED" ? at : null,
             endedAt: null,
           },
         },
@@ -119,16 +139,21 @@ async function platform(page: Page, failure?: "conflict" | "denied") {
           body: request.postDataJSON(),
           key: request.headers()["idempotency-key"],
         });
-        if (failure) {
-          status = failure === "conflict" ? 409 : 403;
+        if (failure && (failure !== "inactive" || writes.length === 1)) {
+          status = failure === "denied" ? 403 : 409;
           if (failure === "conflict") version = 10;
-          else retired = true;
+          else if (failure === "inactive") {
+            membershipStatus = "SUSPENDED";
+            version = 5;
+          } else retired = true;
           json = {
             error: {
               code:
                 failure === "conflict"
                   ? "PLATFORM_MEMBERSHIP_VERSION_CONFLICT"
-                  : "PERMISSION_DENIED",
+                  : failure === "inactive"
+                    ? "PLATFORM_PERMISSION_TARGET_MEMBERSHIP_INACTIVE"
+                    : "PERMISSION_DENIED",
               message: "Private backend detail",
             },
           };
@@ -150,6 +175,46 @@ async function platform(page: Page, failure?: "conflict" | "denied") {
   });
   return writes;
 }
+test("inactive assignment recovers in place after lifecycle reactivation with fresh version and key", async ({
+  page,
+}) => {
+  const writes = await platform(page, "inactive");
+  await page.goto(`/platform/users/${target}`);
+  await page.getByRole("button", { name: "Edit assignment" }).click();
+  await page.getByRole("checkbox", { name: "Beta" }).check();
+  await page.getByRole("button", { name: "Save assignment" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Save assignment" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Edit assignment" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Reactivate access" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Reactivate access" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Edit assignment" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Edit assignment" }).click();
+  await page.getByRole("checkbox", { name: "Beta" }).check();
+  await page.getByRole("button", { name: "Save assignment" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Save assignment" })
+    .click();
+  await expect(
+    page.getByText("Permission-profile assignment updated."),
+  ).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes[1].body).toEqual({
+    expectedVersion: 6,
+    profileIds: [alpha, beta],
+  });
+  expect(writes[1].key).not.toBe(writes[0].key);
+});
 test("replacement requires confirmation and updates profiles without stale lifecycle version", async ({
   page,
 }) => {
