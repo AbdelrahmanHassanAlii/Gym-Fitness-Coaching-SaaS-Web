@@ -55,6 +55,11 @@ export const platformSupportDecisionRequests = Object.freeze([
 export const platformSupportStartDecisionRequests = Object.freeze([
   Object.freeze({ permission: "support.sessions.start" as const }),
 ]);
+export const platformSupportManagementDecisionRequests = Object.freeze([
+  Object.freeze({ permission: "support.sessions.read" as const }),
+  Object.freeze({ permission: "support.sessions.end_own" as const }),
+  Object.freeze({ permission: "support.sessions.revoke" as const }),
+]);
 
 export async function requestPlatformContext(
   apiClient: ApiClient,

@@ -28,6 +28,7 @@ async function backend(page: Page, options: Options = {}) {
     ? new Date(Date.now() + options.authorityMs).toISOString()
     : null;
   let version = 2,
+    accessVersion = 7,
     status = "ACTIVE",
     contextError = options.contextError ?? "";
   const calls: {
@@ -90,7 +91,7 @@ async function backend(page: Page, options: Options = {}) {
           membership: {
             id: actor,
             status: "ACTIVE",
-            accessVersion: 7,
+            accessVersion,
             updatedAt: startTime,
           },
         },
@@ -102,7 +103,7 @@ async function backend(page: Page, options: Options = {}) {
           accessContext: "USER",
           membershipId: actor,
           membershipStatus: "ACTIVE",
-          accessVersion: 7,
+          accessVersion,
           validUntil,
           decisions: request
             .postDataJSON()
@@ -203,8 +204,67 @@ async function backend(page: Page, options: Options = {}) {
     setRuntimeError: (code: string) => {
       contextError = code;
     },
+    setAuthority: (nextVersion: number, nextPermissions: string[]) => {
+      accessVersion = nextVersion;
+      permissions.splice(0, permissions.length, ...nextPermissions);
+    },
   };
 }
+test("management-only version bump revalidates the existing session and updates administrative gates", async ({
+  page,
+}) => {
+  const mock = await backend(page);
+  await page.goto("/platform/support");
+  await start(page);
+  await expect(page).toHaveURL(/\/app\/support$/);
+  const before = mock.calls.filter(
+    (c) => c.path === "/me/support-context",
+  ).length;
+  const detailReadsBefore = mock.calls.filter(
+    (c) => c.path === `/platform/support/sessions/${sessionId}`,
+  ).length;
+  mock.setAuthority(8, ["support.sessions.start"]);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect
+    .poll(
+      () => mock.calls.filter((c) => c.path === "/me/support-context").length,
+    )
+    .toBeGreaterThan(before);
+  await expect(page.getByLabel("Support Access")).toContainText("Support Gym");
+  expect(
+    mock.calls.filter((c) => c.path === "/platform/support/access-requests"),
+  ).toHaveLength(1);
+  expect(
+    mock.calls
+      .filter((c) => c.path === "/me/support-context")
+      .every((c) => c.selector === sessionId),
+  ).toBe(true);
+  await page
+    .getByRole("link", { name: "Return to support console" })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/platform\/support$/);
+  await expect(
+    page.getByRole("link", { name: "Enter read-only workspace" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Administrative session detail" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "End Support", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Revoke Support Access", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    mock.calls.filter(
+      (c) => c.path === `/platform/support/sessions/${sessionId}`,
+    ),
+  ).toHaveLength(detailReadsBefore);
+});
 async function start(page: Page, ar = false) {
   await page
     .getByLabel(ar ? "معرّف مساحة العمل" : "Workspace ID", { exact: true })

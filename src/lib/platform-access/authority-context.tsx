@@ -16,6 +16,7 @@ export interface PlatformAuthority {
   sessionGeneration: number;
   validUntil: string | null;
   supportStartDecision?: { allowed: boolean; validUntil: string | null };
+  supportManagementValidUntil?: string | null;
 }
 
 const PlatformAuthorityContext = createContext<PlatformAuthority | null>(null);

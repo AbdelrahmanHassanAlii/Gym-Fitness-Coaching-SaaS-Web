@@ -9,8 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { useAuthSession } from "@/lib/auth";
+import { useQueryClient } from "@tanstack/react-query";
+import { publishSupportAuthority } from "@/lib/platform-access/support-authority-sync";
+import type { PlatformContextDto } from "@/contracts";
 import {
-  platformSupportDecisionRequests,
+  platformSupportManagementDecisionRequests,
+  platformAccessKeys,
   platformSupportStartDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
@@ -20,6 +24,7 @@ import { SupportRuntime, type SupportAuthority } from "./runtime";
 const RuntimeContext = createContext<SupportRuntime | null>(null);
 export function SupportContextProvider({ children }: { children: ReactNode }) {
   const [runtime] = useState(() => new SupportRuntime());
+  const queryClient = useQueryClient();
   const { apiClient, generation, state } = useAuthSession();
   const snapshot = useSyncExternalStore(
     runtime.subscribe,
@@ -34,20 +39,20 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     runtime.bindAuth(authIdentity);
   }, [runtime, authIdentity]);
-  const hasContext = snapshot.context !== null;
+  const hasSelection = snapshot.context !== null || snapshot.revalidating;
   useEffect(() => {
-    if (!hasContext) return;
-    const { epoch, authority: captured } = runtime.getSnapshot();
-    if (!captured) return;
-    const controller = new AbortController();
-    let busy = false;
+    if (!hasSelection) return;
+    let busy = false,
+      disposed = false,
+      flight: AbortController | null = null;
     const refresh = async () => {
-      if (
-        busy ||
-        controller.signal.aborted ||
-        runtime.getSnapshot().epoch !== epoch
-      )
-        return;
+      if (busy || disposed) return;
+      const captured = runtime.getSnapshot().authority;
+      if (!captured) return;
+      let epoch = runtime.getSnapshot().epoch;
+      const controller = new AbortController();
+      flight = controller;
+      runtime.attachAuthorityRefresh(controller);
       busy = true;
       try {
         const context = await requestPlatformContext(
@@ -59,10 +64,21 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
         if (
           context.membership.status !== "ACTIVE" ||
           context.membership.id !== captured.membershipId ||
-          context.membership.accessVersion !== captured.accessVersion
+          context.membership.accessVersion < captured.accessVersion
         ) {
           runtime.retire();
           return;
+        }
+        if (
+          context.membership.accessVersion !== captured.accessVersion ||
+          runtime.getSnapshot().revalidating
+        ) {
+          epoch = runtime.beginAuthorityRevalidation(
+            context.membership.accessVersion,
+            controller,
+          );
+          if (controller.signal.aborted || !runtime.getSnapshot().revalidating)
+            return;
         }
         const decisions = await requestPlatformEffectiveAccessDecisions(
           apiClient,
@@ -70,7 +86,7 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
             membershipId: context.membership.id,
             accessVersion: context.membership.accessVersion,
           },
-          platformSupportDecisionRequests,
+          platformSupportManagementDecisionRequests,
           controller.signal,
         );
         if (controller.signal.aborted || runtime.getSnapshot().epoch !== epoch)
@@ -88,6 +104,7 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
           return;
         const next: SupportAuthority = {
           ...captured,
+          accessVersion: context.membership.accessVersion,
           validUntil: decisions.validUntil,
           startValidUntil: startDecision.validUntil,
           permissions: [
@@ -100,25 +117,67 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
               .filter((p) => p !== "support.sessions.start"),
           ],
         };
-        runtime.observeAuthority(next);
-        if (runtime.getSnapshot().epoch !== epoch) return;
+        if (
+          !(await publishSupportAuthority(
+            queryClient,
+            captured,
+            context,
+            decisions,
+            startDecision,
+            () =>
+              !controller.signal.aborted &&
+              runtime.getSnapshot().epoch === epoch,
+          ))
+        ) {
+          if (
+            !controller.signal.aborted &&
+            runtime.getSnapshot().epoch === epoch
+          ) {
+            const latest = queryClient.getQueryData<PlatformContextDto>(
+              platformAccessKeys.context(captured),
+            );
+            if (
+              latest?.membership.status === "ACTIVE" &&
+              latest.membership.id === captured.membershipId &&
+              latest.membership.accessVersion > context.membership.accessVersion
+            )
+              runtime.beginAuthorityRevalidation(
+                latest.membership.accessVersion,
+              );
+            else runtime.retire();
+          }
+          return;
+        }
+        if (!runtime.acceptRediscoveredAuthority(next, epoch)) return;
         await runtime.validate(apiClient);
       } catch {
         if (!controller.signal.aborted && runtime.getSnapshot().epoch === epoch)
           runtime.retire();
       } finally {
         busy = false;
+        if (
+          !disposed &&
+          controller.signal.aborted &&
+          runtime.getSnapshot().revalidating
+        )
+          void refresh();
       }
     };
     const timer = window.setInterval(() => void refresh(), 20_000);
     const focus = () => void refresh();
+    const unsubscribe = runtime.subscribe(() => {
+      if (runtime.getSnapshot().revalidating) void refresh();
+    });
+    if (runtime.getSnapshot().revalidating) void refresh();
     window.addEventListener("focus", focus);
     return () => {
-      controller.abort();
+      disposed = true;
+      flight?.abort();
+      unsubscribe();
       window.clearInterval(timer);
       window.removeEventListener("focus", focus);
     };
-  }, [runtime, apiClient, snapshot.epoch, hasContext]);
+  }, [runtime, apiClient, hasSelection, queryClient]);
   useEffect(() => () => runtime.dispose(), [runtime]);
   return (
     <RuntimeContext.Provider value={runtime}>

@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   PlatformEffectiveAccessDecisionsDto,
@@ -23,6 +30,7 @@ import {
   platformUserManagementDecisionRequests,
   platformSupportDecisionRequests,
   platformSupportStartDecisionRequests,
+  platformSupportManagementDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
@@ -80,6 +88,8 @@ const navigationPermissions = {
   workspaces: "platform_workspaces.manage",
 } as const satisfies Record<string, PlatformFoundationPermission>;
 const maxSafeTimerDelay = 2_147_483_647;
+const subscribeNothing = () => () => {};
+const noSupportSnapshot = () => null;
 
 export function PlatformShell({
   children,
@@ -96,6 +106,11 @@ export function PlatformShell({
     pathname.startsWith("/platform/support") ||
     /^\/platform\/workspaces\/[^/]+\/support$/.test(pathname);
   const runtime = useOptionalSupportRuntime();
+  const supportSnapshot = useSyncExternalStore(
+    runtime?.subscribe ?? subscribeNothing,
+    runtime?.getSnapshot ?? noSupportSnapshot,
+    runtime?.getSnapshot ?? noSupportSnapshot,
+  );
   const decisionRequests = supportRoute
     ? platformSupportDecisionRequests
     : /^\/platform\/workspaces\/[0-9a-f]{24}$/.test(pathname)
@@ -198,6 +213,69 @@ export function PlatformShell({
       ),
     retry: false,
   });
+  const managementKey =
+    principalId && activeMembership
+      ? platformAccessKeys.decisions({
+          accessVersion: activeMembership.accessVersion,
+          membershipId: activeMembership.id,
+          membershipStatus: "ACTIVE",
+          principalId,
+          requests: platformSupportManagementDecisionRequests,
+          sessionGeneration: generation,
+        })
+      : [...platformAccessKeys.all, "support-management-disabled"];
+  const managementDecisionsQuery = useQuery({
+    enabled:
+      supportRoute &&
+      contextEnabled &&
+      activeMembership !== null &&
+      !isRecovering,
+    queryKey: managementKey,
+    queryFn: ({ signal }) =>
+      requestPlatformEffectiveAccessDecisions(
+        apiClient,
+        {
+          accessVersion: activeMembership!.accessVersion,
+          membershipId: activeMembership!.id,
+        },
+        platformSupportManagementDecisionRequests,
+        signal,
+      ),
+    retry: false,
+  });
+  const [expiredManagementIdentity, setExpiredManagementIdentity] = useState<
+    string | null
+  >(null);
+  const managementIdentity = decisionFingerprint(
+    managementDecisionsQuery.data,
+    managementKey,
+  );
+  const managementDeadline = managementDecisionsQuery.data?.validUntil;
+  const refetchManagement = managementDecisionsQuery.refetch;
+  useEffect(() => {
+    if (!supportRoute || !managementDeadline || !managementIdentity) return;
+    let timer: number | undefined,
+      disposed = false;
+    const wake = () => {
+      if (disposed) return;
+      const remaining = Date.parse(managementDeadline) - Date.now();
+      if (remaining <= 0) {
+        setExpiredManagementIdentity(managementIdentity);
+        void refetchManagement();
+      } else
+        timer = window.setTimeout(wake, Math.min(remaining, maxSafeTimerDelay));
+    };
+    wake();
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [supportRoute, managementDeadline, managementIdentity, refetchManagement]);
+  const managementUsable =
+    !managementDecisionsQuery.isError &&
+    !isDecisionExpired(managementDecisionsQuery.data) &&
+    (managementIdentity === null ||
+      managementIdentity !== expiredManagementIdentity);
 
   useEffect(() => {
     const previous = previousDecisionKey.current;
@@ -299,6 +377,24 @@ export function PlatformShell({
 
   useEffect(() => {
     if (!supportRoute || !runtime) return;
+    const selectedAuthority = runtime.getSnapshot().authority;
+    if (
+      contextEnabled &&
+      !contextQuery.isError &&
+      activeMembership &&
+      principalId &&
+      selectedAuthority &&
+      selectedAuthority.principalId === principalId &&
+      selectedAuthority.sessionGeneration === generation &&
+      selectedAuthority.membershipId === activeMembership.id
+    ) {
+      if (activeMembership.accessVersion !== selectedAuthority.accessVersion) {
+        if (activeMembership.accessVersion > selectedAuthority.accessVersion)
+          runtime.beginAuthorityRevalidation(activeMembership.accessVersion);
+        return;
+      }
+      if (runtime.getSnapshot().revalidating) return;
+    }
     if (
       !contextEnabled ||
       contextQuery.isError ||
@@ -315,15 +411,15 @@ export function PlatformShell({
       sessionGeneration: generation,
       membershipId: activeMembership.id,
       accessVersion: activeMembership.accessVersion,
-      validUntil: decisionsQuery.data?.validUntil ?? null,
+      validUntil: managementDecisionsQuery.data?.validUntil ?? null,
       startValidUntil: startDecisionsQuery.data.validUntil,
       permissions: [
         ...(startDecisionsQuery.data.decisions[0].allowed
           ? ["support.sessions.start"]
           : []),
-        ...(isDecisionExpired(decisionsQuery.data)
+        ...(!managementUsable
           ? []
-          : (decisionsQuery.data?.decisions ?? [])
+          : (managementDecisionsQuery.data?.decisions ?? [])
         )
           .filter((d) => d.allowed && d.permission.startsWith("support."))
           .map((d) => d.permission)
@@ -342,6 +438,8 @@ export function PlatformShell({
     startDecisionsQuery.isError,
     contextEnabled,
     contextQuery.isError,
+    managementDecisionsQuery.data,
+    managementUsable,
   ]);
 
   if (accessState !== "READY" && accessState !== "DENIED") {
@@ -382,12 +480,35 @@ export function PlatformShell({
     ) {
       await refetchDecisions();
       if (supportRoute) await startDecisionsQuery.refetch();
+      if (supportRoute) await refetchManagement();
     }
   };
   const authority = {
     accessVersion: activeMembership!.accessVersion,
-    allows: (permission: PlatformFoundationPermission) =>
-      allowedPermissions.has(permission),
+    allows: (permission: PlatformFoundationPermission) => {
+      if (supportRoute && permission.startsWith("support.")) {
+        if (
+          supportSnapshot?.revalidating ||
+          (supportSnapshot?.authority &&
+            supportSnapshot.authority.accessVersion !==
+              activeMembership!.accessVersion)
+        )
+          return false;
+        if (permission === "support.sessions.start")
+          return (
+            !startDecisionsQuery.isError &&
+            startDecisionsQuery.data?.decisions[0].allowed === true &&
+            !isDecisionExpired(startDecisionsQuery.data)
+          );
+        return (
+          managementUsable &&
+          managementDecisionsQuery.data?.decisions.some(
+            (d) => d.permission === permission && d.allowed,
+          ) === true
+        );
+      }
+      return allowedPermissions.has(permission);
+    },
     membershipId: activeMembership!.id,
     principalId: principalId!,
     refresh: refreshAuthority,
@@ -400,6 +521,9 @@ export function PlatformShell({
             startDecisionsQuery.data?.decisions[0].allowed === true,
           validUntil: startDecisionsQuery.data?.validUntil ?? null,
         }
+      : undefined,
+    supportManagementValidUntil: supportRoute
+      ? (managementDecisionsQuery.data?.validUntil ?? null)
       : undefined,
   };
 

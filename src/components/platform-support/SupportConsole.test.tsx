@@ -20,6 +20,7 @@ import {
   useSupportSnapshot,
 } from "@/lib/platform-support/support-context";
 import type { SupportRuntime } from "@/lib/platform-support/runtime";
+import { AppQueryProvider } from "@/lib/server-state/query-provider";
 import { SupportWorkspaceView } from "./SupportWorkspaceView";
 import { SupportConsole } from "./SupportConsole";
 import { SupportSessionDetail } from "./SupportSessionDetail";
@@ -100,16 +101,18 @@ function tree(
   detailId = id,
 ) {
   return (
-    <PlatformAuthorityProvider authority={authority(permissions)}>
-      <SupportContextProvider>
-        <SupportBanner locale={locale} />
-        {detail ? (
-          <SupportSessionDetail sessionId={detailId} locale={locale} />
-        ) : (
-          <SupportConsole locale={locale} />
-        )}
-      </SupportContextProvider>
-    </PlatformAuthorityProvider>
+    <AppQueryProvider>
+      <PlatformAuthorityProvider authority={authority(permissions)}>
+        <SupportContextProvider>
+          <SupportBanner locale={locale} />
+          {detail ? (
+            <SupportSessionDetail sessionId={detailId} locale={locale} />
+          ) : (
+            <SupportConsole locale={locale} />
+          )}
+        </SupportContextProvider>
+      </PlatformAuthorityProvider>
+    </AppQueryProvider>
   );
 }
 async function confirmStart() {
@@ -212,13 +215,15 @@ describe("Independent runtime authority refresh", () => {
   }
   function activeTree(permissions = all) {
     return (
-      <PlatformAuthorityProvider authority={authority(permissions)}>
-        <SupportContextProvider>
-          <SupportBanner locale="en" />
-          <SupportConsole locale="en" />
-          <Probe />
-        </SupportContextProvider>
-      </PlatformAuthorityProvider>
+      <AppQueryProvider>
+        <PlatformAuthorityProvider authority={authority(permissions)}>
+          <SupportContextProvider>
+            <SupportBanner locale="en" />
+            <SupportConsole locale="en" />
+            <Probe />
+          </SupportContextProvider>
+        </PlatformAuthorityProvider>
+      </AppQueryProvider>
     );
   }
   function refreshReplies(
@@ -270,62 +275,6 @@ describe("Independent runtime authority refresh", () => {
       },
     );
   }
-  it.each([
-    "support.sessions.read",
-    "support.sessions.end_own",
-    "support.sessions.revoke",
-    "all",
-  ])("keeps banner and landing after controlled %s loss", async (lost) => {
-    const view = render(activeTree());
-    await confirmStart();
-    await waitFor(() => expect(runtime.getSnapshot().context).not.toBeNull());
-    const epoch = runtime.getSnapshot().epoch;
-    const next = all.filter(
-      (p) => p === "support.sessions.start" || (lost !== "all" && p !== lost),
-    );
-    refreshReplies(next);
-    fireEvent(window, new Event("focus"));
-    await waitFor(() =>
-      expect(
-        [...(runtime.getSnapshot().authority?.permissions ?? [])].sort(),
-      ).toEqual([...next].sort()),
-    );
-    view.rerender(activeTree(next));
-    expect(runtime.getSnapshot().epoch).toBe(epoch);
-    expect(runtime.isSelected(id)).toBe(true);
-    expect(screen.getByLabelText("Support Access")).toHaveTextContent(
-      "Known Gym",
-    );
-    expect(screen.getByTestId("landing")).toHaveTextContent("Known Gym");
-    if (!next.includes("support.sessions.read")) {
-      const detailCalls = request.mock.calls.filter(
-        ([o]) => o.path === `/platform/support/sessions/${id}`,
-      ).length;
-      expect(
-        screen.queryByText("Administrative session detail"),
-      ).not.toBeInTheDocument();
-      fireEvent(window, new Event("focus"));
-      await waitFor(() =>
-        expect(
-          request.mock.calls.filter(([o]) => o.path === "/me/platform-context")
-            .length,
-        ).toBeGreaterThan(1),
-      );
-      expect(
-        request.mock.calls.filter(
-          ([o]) => o.path === `/platform/support/sessions/${id}`,
-        ),
-      ).toHaveLength(detailCalls);
-    }
-    if (!next.includes("support.sessions.end_own"))
-      expect(
-        screen.queryByRole("button", { name: "End Support" }),
-      ).not.toBeInTheDocument();
-    if (!next.includes("support.sessions.revoke"))
-      expect(
-        screen.queryByRole("button", { name: "Revoke Support Access" }),
-      ).not.toBeInTheDocument();
-  });
   it("start loss purges banner, selected ID and landing", async () => {
     render(activeTree());
     await confirmStart();

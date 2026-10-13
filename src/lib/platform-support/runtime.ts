@@ -19,7 +19,10 @@ export function supportAuthority(
     sessionGeneration: authority.sessionGeneration,
     membershipId: authority.membershipId,
     accessVersion: authority.accessVersion,
-    validUntil: authority.validUntil,
+    validUntil:
+      authority.supportManagementValidUntil === undefined
+        ? authority.validUntil
+        : authority.supportManagementValidUntil,
     startValidUntil: authority.supportStartDecision?.validUntil ?? null,
     permissions: supportPermissions.filter((p) =>
       p === "support.sessions.start"
@@ -66,6 +69,7 @@ export interface RuntimeSnapshot {
   context: SupportContext | null;
   authority: SupportAuthority | null;
   pending: boolean;
+  revalidating: boolean;
   notice: "expired" | "lost" | "ended" | null;
 }
 const initial: RuntimeSnapshot = {
@@ -73,6 +77,7 @@ const initial: RuntimeSnapshot = {
   context: null,
   authority: null,
   pending: false,
+  revalidating: false,
   notice: null,
 };
 /** One instance per React root/tab. No query cache, storage, URL or native fallback. */
@@ -80,8 +85,13 @@ export class SupportRuntime {
   private snapshot: RuntimeSnapshot = initial;
   private listeners = new Set<() => void>();
   private flight: AbortController | null = null;
+  private authorityFlight: AbortController | null = null;
   private authIdentity: string | null = null;
-  private selected: { id: string; workspaceId: string } | null = null;
+  private selected: {
+    id: string;
+    workspaceId: string;
+    expiresAt?: string;
+  } | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -101,6 +111,8 @@ export class SupportRuntime {
     }
   }
   retire(notice: RuntimeSnapshot["notice"] = "lost") {
+    this.authorityFlight?.abort();
+    this.authorityFlight = null;
     this.flight?.abort();
     this.flight = null;
     this.selected = null;
@@ -110,6 +122,7 @@ export class SupportRuntime {
       context: null,
       authority: null,
       pending: false,
+      revalidating: false,
       notice:
         this.snapshot.context || this.snapshot.pending
           ? notice
@@ -123,6 +136,22 @@ export class SupportRuntime {
     if (!this.selected) return;
     const prior = this.snapshot.authority;
     if (
+      authority &&
+      prior &&
+      this.sameActor(prior, authority) &&
+      prior.accessVersion !== authority.accessVersion
+    ) {
+      this.beginAuthorityRevalidation(authority.accessVersion);
+      return;
+    }
+    if (
+      this.snapshot.revalidating &&
+      authority &&
+      prior &&
+      this.sameActor(prior, authority)
+    )
+      return;
+    if (
       !authority ||
       !prior ||
       runtimeAuthorityIdentity(prior) !== runtimeAuthorityIdentity(authority) ||
@@ -133,6 +162,62 @@ export class SupportRuntime {
       this.publish({ ...this.snapshot, authority });
       this.schedule();
     }
+  }
+  private sameActor(a: SupportAuthority, b: SupportAuthority) {
+    return (
+      a.principalId === b.principalId &&
+      a.sessionGeneration === b.sessionGeneration &&
+      a.membershipId === b.membershipId
+    );
+  }
+  attachAuthorityRefresh(controller: AbortController) {
+    this.authorityFlight?.abort();
+    this.authorityFlight = controller;
+  }
+  beginAuthorityRevalidation(
+    accessVersion: number,
+    ownFlight?: AbortController,
+  ): number {
+    const prior = this.snapshot.authority;
+    if (!this.selected || !prior || accessVersion < prior.accessVersion) {
+      this.retire();
+      return this.snapshot.epoch;
+    }
+    if (this.snapshot.revalidating && prior.accessVersion === accessVersion)
+      return this.snapshot.epoch;
+    if (this.authorityFlight !== ownFlight) this.authorityFlight?.abort();
+    this.flight?.abort();
+    this.publish({
+      ...this.snapshot,
+      epoch: this.snapshot.epoch + 1,
+      context: null,
+      authority: { ...prior, accessVersion, permissions: [], validUntil: null },
+      pending: true,
+      revalidating: true,
+      notice: null,
+    });
+    this.schedule();
+    return this.snapshot.epoch;
+  }
+  acceptRediscoveredAuthority(
+    authority: SupportAuthority,
+    epoch: number,
+  ): boolean {
+    const prior = this.snapshot.authority;
+    if (this.snapshot.epoch !== epoch || !this.selected || !prior) return false;
+    if (
+      !this.sameActor(prior, authority) ||
+      prior.accessVersion !== authority.accessVersion ||
+      !authorityLive(authority, "support.sessions.start")
+    ) {
+      this.retire();
+      return false;
+    }
+    if (this.snapshot.revalidating) {
+      this.publish({ ...this.snapshot, authority });
+      this.schedule();
+    } else this.observeAuthority(authority);
+    return this.snapshot.epoch === epoch;
   }
   isSelected(id: string) {
     return this.selected?.id === id;
@@ -189,7 +274,14 @@ export class SupportRuntime {
         !authorityLive(authority, "support.sessions.start")
       )
         return false;
-      this.publish({ ...this.snapshot, context, pending: false, notice: null });
+      this.selected!.expiresAt = context.supportSession.expiresAt;
+      this.publish({
+        ...this.snapshot,
+        context,
+        pending: false,
+        revalidating: false,
+        notice: null,
+      });
       this.schedule();
       return true;
     } catch {
@@ -217,7 +309,7 @@ export class SupportRuntime {
       });
     }
     const deadlines = [
-      this.snapshot.context?.supportSession.expiresAt,
+      this.selected?.expiresAt,
       this.snapshot.authority?.startValidUntil,
       this.snapshot.authority?.validUntil,
     ]
@@ -228,9 +320,8 @@ export class SupportRuntime {
       remaining = deadline - Date.now();
     if (remaining <= 0) {
       this.retire(
-        this.snapshot.context &&
-          Date.parse(this.snapshot.context.supportSession.expiresAt) <=
-            Date.now()
+        this.selected?.expiresAt &&
+          Date.parse(this.selected.expiresAt) <= Date.now()
           ? "expired"
           : "lost",
       );
