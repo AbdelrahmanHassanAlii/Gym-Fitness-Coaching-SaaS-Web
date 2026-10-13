@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "@/lib/api";
@@ -13,7 +14,13 @@ import {
   PlatformAuthorityProvider,
   type PlatformAuthority,
 } from "@/lib/platform-access";
-import { SupportContextProvider } from "@/lib/platform-support/support-context";
+import {
+  SupportContextProvider,
+  useSupportRuntime,
+  useSupportSnapshot,
+} from "@/lib/platform-support/support-context";
+import type { SupportRuntime } from "@/lib/platform-support/runtime";
+import { SupportWorkspaceView } from "./SupportWorkspaceView";
 import { SupportConsole } from "./SupportConsole";
 import { SupportSessionDetail } from "./SupportSessionDetail";
 import { SupportBanner } from "./SupportBanner";
@@ -78,6 +85,10 @@ function authority(permissions: string[]): PlatformAuthority {
     accessVersion: 7,
     sessionGeneration: 1,
     validUntil: null,
+    supportStartDecision: {
+      allowed: permissions.includes("support.sessions.start"),
+      validUntil: null,
+    },
     allows: (p) => permissions.includes(p),
     refresh: vi.fn(async () => {}),
   };
@@ -112,6 +123,13 @@ async function confirmStart() {
   expect(screen.getByRole("dialog")).toHaveTextContent("Read Only");
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 }
+const dialogDescriptors = {
+  showModal: Object.getOwnPropertyDescriptor(
+    HTMLDialogElement.prototype,
+    "showModal",
+  ),
+  close: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close"),
+};
 beforeEach(() => {
   mocks.push.mockReset();
   mocks.replace.mockReset();
@@ -136,15 +154,268 @@ beforeEach(() => {
     },
     getAccessToken: () => "token",
   }));
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    },
+  });
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  for (const key of ["showModal", "close"] as const) {
+    const descriptor = dialogDescriptors[key];
+    if (descriptor)
+      Object.defineProperty(HTMLDialogElement.prototype, key, descriptor);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, key);
+  }
+});
+describe("Independent runtime authority refresh", () => {
+  it.each(["ar", "en"] as const)(
+    "localizes administrative context/session types in %s",
+    async (locale) => {
+      render(tree(["support.sessions.read"], true, locale));
+      await screen.findByText(
+        locale === "ar" ? "دعم مساحة العمل" : "Workspace Support",
+      );
+      expect(
+        screen.getByText(locale === "ar" ? "للقراءة فقط" : "Read Only"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("WORKSPACE_SUPPORT")).not.toBeInTheDocument();
+      expect(screen.queryByText("READ_ONLY")).not.toBeInTheDocument();
+    },
+  );
+  const all = [
+    "support.sessions.start",
+    "support.sessions.read",
+    "support.sessions.end_own",
+    "support.sessions.revoke",
+  ];
+  let runtime: SupportRuntime;
+  function Probe() {
+    runtime = useSupportRuntime();
+    const snapshot = useSupportSnapshot();
+    return (
+      <div data-testid="landing">
+        <SupportWorkspaceView locale="en" />
+        <output>{snapshot.authority?.permissions.join(",")}</output>
+      </div>
+    );
+  }
+  function activeTree(permissions = all) {
+    return (
+      <PlatformAuthorityProvider authority={authority(permissions)}>
+        <SupportContextProvider>
+          <SupportBanner locale="en" />
+          <SupportConsole locale="en" />
+          <Probe />
+        </SupportContextProvider>
+      </PlatformAuthorityProvider>
+    );
+  }
+  function refreshReplies(
+    permissions: string[],
+    managementDeadline: string | null = null,
+    startDeadline: string | null = null,
+  ) {
+    const original = request.getMockImplementation()! as (options: {
+      path: string;
+    }) => Promise<unknown>;
+    request.mockImplementation(
+      async (options: {
+        path: string;
+        body?: { requests: { permission: string }[] };
+      }) => {
+        if (options.path === "/me/platform-context")
+          return {
+            data: {
+              context: "PLATFORM",
+              accessContext: "USER",
+              membership: {
+                id,
+                status: "ACTIVE",
+                accessVersion: 7,
+                updatedAt: new Date().toISOString(),
+              },
+            },
+          };
+        if (options.path === "/platform/me/effective-access/decisions") {
+          const requested = options.body!.requests;
+          return {
+            data: {
+              context: "PLATFORM",
+              accessContext: "USER",
+              membershipId: id,
+              membershipStatus: "ACTIVE",
+              accessVersion: 7,
+              validUntil:
+                requested.length === 1 ? startDeadline : managementDeadline,
+              decisions: requested.map(({ permission }) => ({
+                permission,
+                allowed: permissions.includes(permission),
+                effect: permissions.includes(permission) ? "ALLOW" : "DENY",
+              })),
+            },
+          };
+        }
+        return original(options);
+      },
+    );
+  }
+  it.each([
+    "support.sessions.read",
+    "support.sessions.end_own",
+    "support.sessions.revoke",
+    "all",
+  ])("keeps banner and landing after controlled %s loss", async (lost) => {
+    const view = render(activeTree());
+    await confirmStart();
+    await waitFor(() => expect(runtime.getSnapshot().context).not.toBeNull());
+    const epoch = runtime.getSnapshot().epoch;
+    const next = all.filter(
+      (p) => p === "support.sessions.start" || (lost !== "all" && p !== lost),
+    );
+    refreshReplies(next);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() =>
+      expect(
+        [...(runtime.getSnapshot().authority?.permissions ?? [])].sort(),
+      ).toEqual([...next].sort()),
+    );
+    view.rerender(activeTree(next));
+    expect(runtime.getSnapshot().epoch).toBe(epoch);
+    expect(runtime.isSelected(id)).toBe(true);
+    expect(screen.getByLabelText("Support Access")).toHaveTextContent(
+      "Known Gym",
+    );
+    expect(screen.getByTestId("landing")).toHaveTextContent("Known Gym");
+    if (!next.includes("support.sessions.read")) {
+      const detailCalls = request.mock.calls.filter(
+        ([o]) => o.path === `/platform/support/sessions/${id}`,
+      ).length;
+      expect(
+        screen.queryByText("Administrative session detail"),
+      ).not.toBeInTheDocument();
+      fireEvent(window, new Event("focus"));
+      await waitFor(() =>
+        expect(
+          request.mock.calls.filter(([o]) => o.path === "/me/platform-context")
+            .length,
+        ).toBeGreaterThan(1),
+      );
+      expect(
+        request.mock.calls.filter(
+          ([o]) => o.path === `/platform/support/sessions/${id}`,
+        ),
+      ).toHaveLength(detailCalls);
+    }
+    if (!next.includes("support.sessions.end_own"))
+      expect(
+        screen.queryByRole("button", { name: "End Support" }),
+      ).not.toBeInTheDocument();
+    if (!next.includes("support.sessions.revoke"))
+      expect(
+        screen.queryByRole("button", { name: "Revoke Support Access" }),
+      ).not.toBeInTheDocument();
+  });
+  it("start loss purges banner, selected ID and landing", async () => {
+    render(activeTree());
+    await confirmStart();
+    await waitFor(() => expect(runtime.getSnapshot().context).not.toBeNull());
+    refreshReplies(all.filter((p) => p !== "support.sessions.start"));
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(runtime.getSnapshot().context).toBeNull());
+    expect(runtime.isSelected(id)).toBe(false);
+    expect(screen.queryByLabelText("Support Access")).not.toBeInTheDocument();
+    expect(screen.getByTestId("landing")).not.toHaveTextContent("Known Gym");
+  });
+  it("management deadline hides actions without ejecting runtime", async () => {
+    render(activeTree());
+    await confirmStart();
+    await waitFor(() => expect(runtime.getSnapshot().context).not.toBeNull());
+    vi.useFakeTimers();
+    refreshReplies(all, new Date(Date.now() + 1000).toISOString());
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(runtime.getSnapshot().context).not.toBeNull();
+    expect(screen.getByLabelText("Support Access")).toHaveTextContent(
+      "Known Gym",
+    );
+    expect(
+      within(screen.getByLabelText("Support Access")).queryByRole("button", {
+        name: "End Support",
+      }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(["management", "start"])(
+    "late old %s authority cannot restore or retire a newer selected context",
+    async (kind) => {
+      render(activeTree());
+      await confirmStart();
+      await waitFor(() => expect(runtime.getSnapshot().context).not.toBeNull());
+      let resolve!: (value: unknown) => void;
+      let pendingPermissions: { permission: string }[] = [];
+      refreshReplies([]);
+      const original = request.getMockImplementation()! as (options: {
+        path: string;
+      }) => Promise<unknown>;
+      request.mockImplementation((options) =>
+        options.path === "/platform/me/effective-access/decisions" &&
+        (kind === "management" || options.body.requests.length === 1)
+          ? new Promise((r) => {
+              pendingPermissions = options.body.requests;
+              resolve = r;
+            })
+          : original(options),
+      );
+      fireEvent(window, new Event("focus"));
+      await waitFor(() => expect(resolve).toBeDefined());
+      await act(async () => {
+        await runtime.select(mocks.auth().apiClient, id, workspace, {
+          principalId: unsafeApiId<"user">(id),
+          membershipId: unsafeApiId<"membership">(id),
+          sessionGeneration: 1,
+          accessVersion: 7,
+          validUntil: null,
+          startValidUntil: null,
+          permissions: all,
+        });
+      });
+      const fresh = runtime.getSnapshot();
+      await act(async () => {
+        resolve({
+          data: {
+            context: "PLATFORM",
+            accessContext: "USER",
+            membershipId: id,
+            membershipStatus: "ACTIVE",
+            accessVersion: 7,
+            validUntil: null,
+            decisions: pendingPermissions.map(({ permission }) => ({
+              permission,
+              allowed: false,
+              effect: "DENY",
+            })),
+          },
+        });
+      });
+      expect(runtime.getSnapshot()).toBe(fresh);
+      expect(runtime.isSelected(id)).toBe(true);
+    },
+  );
 });
 describe("Support start and bootstrap", () => {
   it("denied start has no form, workspace discovery, detail or API request", () => {

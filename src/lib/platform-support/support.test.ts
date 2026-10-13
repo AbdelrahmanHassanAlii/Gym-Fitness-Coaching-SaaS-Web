@@ -78,6 +78,7 @@ const authority: SupportAuthority = {
   sessionGeneration: 1,
   accessVersion: 4,
   validUntil: null,
+  startValidUntil: null,
   permissions: ["support.sessions.start", "support.sessions.end_own"],
 };
 afterEach(() => {
@@ -249,6 +250,66 @@ describe("API intents and selector boundary", () => {
   });
 });
 describe("Memory-only runtime and retirement", () => {
+  const allPermissions = [
+    "support.sessions.start",
+    "support.sessions.read",
+    "support.sessions.end_own",
+    "support.sessions.revoke",
+  ];
+  it.each([
+    "support.sessions.read",
+    "support.sessions.end_own",
+    "support.sessions.revoke",
+    "all",
+  ])(
+    "preserves runtime while management authority %s is lost",
+    async (lost) => {
+      const runtime = setup(),
+        api = { request: vi.fn(async () => current()) } as ApiClient;
+      const initial = { ...authority, permissions: allPermissions };
+      await runtime.select(api, id, workspaceId, initial);
+      const before = runtime.getSnapshot();
+      const permissions = allPermissions.filter(
+        (p) => p === "support.sessions.start" || (lost !== "all" && p !== lost),
+      );
+      runtime.observeAuthority({ ...initial, permissions });
+      expect(runtime.getSnapshot().context).toBe(before.context);
+      expect(runtime.getSnapshot().epoch).toBe(before.epoch);
+      expect(runtime.getSnapshot().authority?.permissions).toEqual(permissions);
+      expect(runtime.isSelected(id)).toBe(true);
+      runtime.observeAuthority({
+        ...initial,
+        permissions: allPermissions.filter(
+          (p) => p !== "support.sessions.start",
+        ),
+      });
+      expect(runtime.getSnapshot().context).toBeNull();
+      expect(runtime.getSnapshot().authority).toBeNull();
+      expect(runtime.isSelected(id)).toBe(false);
+      runtime.dispose();
+    },
+  );
+  it("expires management actions independently from the start deadline", async () => {
+    const runtime = setup(),
+      api = { request: vi.fn(async () => current()) } as ApiClient;
+    await runtime.select(api, id, workspaceId, {
+      ...authority,
+      permissions: allPermissions,
+      validUntil: new Date(Date.parse(at) + 1000).toISOString(),
+      startValidUntil: new Date(Date.parse(at) + 2000).toISOString(),
+    });
+    const epoch = runtime.getSnapshot().epoch;
+    vi.advanceTimersByTime(1000);
+    expect(runtime.getSnapshot().context).not.toBeNull();
+    expect(runtime.getSnapshot().epoch).toBe(epoch);
+    expect(runtime.getSnapshot().authority?.permissions).toEqual([
+      "support.sessions.start",
+    ]);
+    vi.advanceTimersByTime(1000);
+    expect(runtime.getSnapshot().context).toBeNull();
+    expect(runtime.isSelected(id)).toBe(false);
+    runtime.dispose();
+  });
   function setup() {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(at));
@@ -347,7 +408,7 @@ describe("Memory-only runtime and retirement", () => {
       };
     await runtime.select(api, id, workspaceId, {
       ...authority,
-      validUntil: new Date(Date.parse(at) + 1000).toISOString(),
+      startValidUntil: new Date(Date.parse(at) + 1000).toISOString(),
     });
     vi.advanceTimersByTime(1000);
     expect(runtime.getSnapshot().notice).toBe("lost");

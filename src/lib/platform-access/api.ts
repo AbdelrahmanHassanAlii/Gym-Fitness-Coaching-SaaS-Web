@@ -51,6 +51,11 @@ export const platformSupportDecisionRequests = Object.freeze([
   ).map((permission) => Object.freeze({ permission })),
 ]);
 
+// The Backend deadline covers the whole batch. Runtime needs the start-only deadline.
+export const platformSupportStartDecisionRequests = Object.freeze([
+  Object.freeze({ permission: "support.sessions.start" as const }),
+]);
+
 export async function requestPlatformContext(
   apiClient: ApiClient,
   signal?: AbortSignal,

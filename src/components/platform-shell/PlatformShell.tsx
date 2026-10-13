@@ -22,6 +22,7 @@ import {
   platformWorkspaceDecisionRequests,
   platformUserManagementDecisionRequests,
   platformSupportDecisionRequests,
+  platformSupportStartDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
@@ -168,6 +169,35 @@ export function PlatformShell({
   });
   const refetchContext = contextQuery.refetch;
   const refetchDecisions = decisionsQuery.refetch;
+  const startDecisionsQuery = useQuery({
+    enabled:
+      supportRoute &&
+      contextEnabled &&
+      activeMembership !== null &&
+      !isRecovering,
+    queryKey:
+      principalId && activeMembership
+        ? platformAccessKeys.decisions({
+            accessVersion: activeMembership.accessVersion,
+            membershipId: activeMembership.id,
+            membershipStatus: "ACTIVE",
+            principalId,
+            requests: platformSupportStartDecisionRequests,
+            sessionGeneration: generation,
+          })
+        : [...platformAccessKeys.all, "support-start-disabled"],
+    queryFn: ({ signal }) =>
+      requestPlatformEffectiveAccessDecisions(
+        apiClient,
+        {
+          accessVersion: activeMembership!.accessVersion,
+          membershipId: activeMembership!.id,
+        },
+        platformSupportStartDecisionRequests,
+        signal,
+      ),
+    retry: false,
+  });
 
   useEffect(() => {
     const previous = previousDecisionKey.current;
@@ -270,10 +300,12 @@ export function PlatformShell({
   useEffect(() => {
     if (!supportRoute || !runtime) return;
     if (
-      (accessState !== "READY" && accessState !== "DENIED") ||
+      !contextEnabled ||
+      contextQuery.isError ||
       !activeMembership ||
       !principalId ||
-      !decisionsQuery.data
+      !startDecisionsQuery.data ||
+      startDecisionsQuery.isError
     ) {
       runtime.observeAuthority(null);
       return;
@@ -283,10 +315,20 @@ export function PlatformShell({
       sessionGeneration: generation,
       membershipId: activeMembership.id,
       accessVersion: activeMembership.accessVersion,
-      validUntil: decisionsQuery.data.validUntil,
-      permissions: decisionsQuery.data.decisions
-        .filter((d) => d.allowed && d.permission.startsWith("support."))
-        .map((d) => d.permission),
+      validUntil: decisionsQuery.data?.validUntil ?? null,
+      startValidUntil: startDecisionsQuery.data.validUntil,
+      permissions: [
+        ...(startDecisionsQuery.data.decisions[0].allowed
+          ? ["support.sessions.start"]
+          : []),
+        ...(isDecisionExpired(decisionsQuery.data)
+          ? []
+          : (decisionsQuery.data?.decisions ?? [])
+        )
+          .filter((d) => d.allowed && d.permission.startsWith("support."))
+          .map((d) => d.permission)
+          .filter((p) => p !== "support.sessions.start"),
+      ],
     });
   }, [
     runtime,
@@ -296,6 +338,10 @@ export function PlatformShell({
     principalId,
     generation,
     decisionsQuery.data,
+    startDecisionsQuery.data,
+    startDecisionsQuery.isError,
+    contextEnabled,
+    contextQuery.isError,
   ]);
 
   if (accessState !== "READY" && accessState !== "DENIED") {
@@ -335,6 +381,7 @@ export function PlatformShell({
         activeMembership!.accessVersion
     ) {
       await refetchDecisions();
+      if (supportRoute) await startDecisionsQuery.refetch();
     }
   };
   const authority = {
@@ -346,6 +393,14 @@ export function PlatformShell({
     refresh: refreshAuthority,
     sessionGeneration: generation,
     validUntil: decisionsQuery.data!.validUntil,
+    supportStartDecision: supportRoute
+      ? {
+          allowed:
+            !startDecisionsQuery.isError &&
+            startDecisionsQuery.data?.decisions[0].allowed === true,
+          validUntil: startDecisionsQuery.data?.validUntil ?? null,
+        }
+      : undefined,
   };
 
   return (

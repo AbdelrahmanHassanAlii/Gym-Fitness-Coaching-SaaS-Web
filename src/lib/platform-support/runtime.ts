@@ -10,7 +10,7 @@ export type SupportAuthority = Pick<
   | "membershipId"
   | "accessVersion"
   | "validUntil"
-> & { permissions: readonly string[] };
+> & { permissions: readonly string[]; startValidUntil: string | null };
 export function supportAuthority(
   authority: PlatformAuthority,
 ): SupportAuthority {
@@ -20,7 +20,12 @@ export function supportAuthority(
     membershipId: authority.membershipId,
     accessVersion: authority.accessVersion,
     validUntil: authority.validUntil,
-    permissions: supportPermissions.filter((p) => authority.allows(p)),
+    startValidUntil: authority.supportStartDecision?.validUntil ?? null,
+    permissions: supportPermissions.filter((p) =>
+      p === "support.sessions.start"
+        ? authority.supportStartDecision?.allowed === true
+        : authority.allows(p),
+    ),
   };
 }
 export function authorityIdentity(a: SupportAuthority): string {
@@ -30,7 +35,18 @@ export function authorityIdentity(a: SupportAuthority): string {
     a.membershipId,
     a.accessVersion,
     a.validUntil,
+    a.startValidUntil,
     [...a.permissions].sort(),
+  ]);
+}
+export function runtimeAuthorityIdentity(a: SupportAuthority): string {
+  return JSON.stringify([
+    a.principalId,
+    a.sessionGeneration,
+    a.membershipId,
+    a.accessVersion,
+    a.startValidUntil,
+    a.permissions.includes("support.sessions.start"),
   ]);
 }
 export function authorityLive(
@@ -38,9 +54,11 @@ export function authorityLive(
   permission: string,
   now = Date.now(),
 ): boolean {
+  const deadline =
+    permission === "support.sessions.start" ? a.startValidUntil : a.validUntil;
   return (
     a.permissions.includes(permission) &&
-    (a.validUntil === null || Date.parse(a.validUntil) > now)
+    (deadline === null || Date.parse(deadline) > now)
   );
 }
 export interface RuntimeSnapshot {
@@ -107,10 +125,14 @@ export class SupportRuntime {
     if (
       !authority ||
       !prior ||
-      authorityIdentity(prior) !== authorityIdentity(authority) ||
+      runtimeAuthorityIdentity(prior) !== runtimeAuthorityIdentity(authority) ||
       !authorityLive(authority, "support.sessions.start")
     )
       this.retire("lost");
+    else if (authorityIdentity(prior) !== authorityIdentity(authority)) {
+      this.publish({ ...this.snapshot, authority });
+      this.schedule();
+    }
   }
   isSelected(id: string) {
     return this.selected?.id === id;
@@ -178,8 +200,25 @@ export class SupportRuntime {
   }
   private schedule() {
     clearTimeout(this.timer);
+    const authority = this.snapshot.authority;
+    if (
+      authority?.validUntil &&
+      Date.parse(authority.validUntil) <= Date.now()
+    ) {
+      this.publish({
+        ...this.snapshot,
+        authority: {
+          ...authority,
+          validUntil: null,
+          permissions: authority.permissions.filter(
+            (p) => p === "support.sessions.start",
+          ),
+        },
+      });
+    }
     const deadlines = [
       this.snapshot.context?.supportSession.expiresAt,
+      this.snapshot.authority?.startValidUntil,
       this.snapshot.authority?.validUntil,
     ]
       .filter((v): v is string => typeof v === "string")

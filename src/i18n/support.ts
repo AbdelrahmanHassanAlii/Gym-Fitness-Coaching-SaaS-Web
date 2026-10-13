@@ -23,6 +23,11 @@ const en = {
   context: "Workspace support",
   contextType: "Context type",
   sessionType: "Session type",
+  contextTypes: {
+    WORKSPACE_SUPPORT: "Workspace Support",
+    USER_CONTEXT: "User Context",
+  },
+  sessionTypes: { READ_ONLY: "Read Only", WRITE_SUPPORT: "Write Support" },
   expires: "Expires At",
   started: "Started At",
   version: "Version",
@@ -115,6 +120,14 @@ const ar: typeof en = {
   context: "دعم مساحة العمل",
   contextType: "نوع السياق",
   sessionType: "نوع الجلسة",
+  contextTypes: {
+    WORKSPACE_SUPPORT: "دعم مساحة العمل",
+    USER_CONTEXT: "سياق المستخدم",
+  },
+  sessionTypes: {
+    READ_ONLY: "للقراءة فقط",
+    WRITE_SUPPORT: "دعم مع صلاحية الكتابة",
+  },
   expires: "ينتهي في",
   started: "بدأت في",
   version: "الإصدار",

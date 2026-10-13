@@ -11,14 +11,11 @@ import {
 import { useAuthSession } from "@/lib/auth";
 import {
   platformSupportDecisionRequests,
+  platformSupportStartDecisionRequests,
   requestPlatformContext,
   requestPlatformEffectiveAccessDecisions,
 } from "@/lib/platform-access";
-import {
-  SupportRuntime,
-  authorityIdentity,
-  type SupportAuthority,
-} from "./runtime";
+import { SupportRuntime, type SupportAuthority } from "./runtime";
 
 const RuntimeContext = createContext<SupportRuntime | null>(null);
 export function SupportContextProvider({ children }: { children: ReactNode }) {
@@ -37,10 +34,11 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     runtime.bindAuth(authIdentity);
   }, [runtime, authIdentity]);
+  const hasContext = snapshot.context !== null;
   useEffect(() => {
-    if (!snapshot.context) return;
-    const epoch = snapshot.epoch,
-      captured = snapshot.authority!;
+    if (!hasContext) return;
+    const { epoch, authority: captured } = runtime.getSnapshot();
+    if (!captured) return;
     const controller = new AbortController();
     let busy = false;
     const refresh = async () => {
@@ -77,18 +75,33 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
         );
         if (controller.signal.aborted || runtime.getSnapshot().epoch !== epoch)
           return;
+        const startDecision = await requestPlatformEffectiveAccessDecisions(
+          apiClient,
+          {
+            membershipId: context.membership.id,
+            accessVersion: context.membership.accessVersion,
+          },
+          platformSupportStartDecisionRequests,
+          controller.signal,
+        );
+        if (controller.signal.aborted || runtime.getSnapshot().epoch !== epoch)
+          return;
         const next: SupportAuthority = {
           ...captured,
           validUntil: decisions.validUntil,
-          permissions: decisions.decisions
-            .filter((d) => d.allowed && d.permission.startsWith("support."))
-            .map((d) => d.permission),
+          startValidUntil: startDecision.validUntil,
+          permissions: [
+            ...(startDecision.decisions[0].allowed
+              ? ["support.sessions.start"]
+              : []),
+            ...decisions.decisions
+              .filter((d) => d.allowed && d.permission.startsWith("support."))
+              .map((d) => d.permission)
+              .filter((p) => p !== "support.sessions.start"),
+          ],
         };
-        // A newly shortened deadline or changed grants invalidates the old runtime.
-        if (authorityIdentity(next) !== authorityIdentity(captured)) {
-          runtime.retire();
-          return;
-        }
+        runtime.observeAuthority(next);
+        if (runtime.getSnapshot().epoch !== epoch) return;
         await runtime.validate(apiClient);
       } catch {
         if (!controller.signal.aborted && runtime.getSnapshot().epoch === epoch)
@@ -105,13 +118,7 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
       window.clearInterval(timer);
       window.removeEventListener("focus", focus);
     };
-  }, [
-    runtime,
-    apiClient,
-    snapshot.epoch,
-    snapshot.context,
-    snapshot.authority,
-  ]);
+  }, [runtime, apiClient, snapshot.epoch, hasContext]);
   useEffect(() => () => runtime.dispose(), [runtime]);
   return (
     <RuntimeContext.Provider value={runtime}>

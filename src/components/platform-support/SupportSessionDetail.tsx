@@ -333,13 +333,9 @@ export function SessionFacts({
             : "—"}
       </dd>
       <dt>{labels.contextType}</dt>
-      <dd>
-        <bdi>{session.contextType}</bdi>
-      </dd>
+      <dd>{labels.contextTypes[session.contextType]}</dd>
       <dt>{labels.sessionType}</dt>
-      <dd>
-        <bdi>{session.sessionType}</bdi>
-      </dd>
+      <dd>{labels.sessionTypes[session.sessionType]}</dd>
       <dt>{labels.status}</dt>
       <dd>{labels.statuses[session.status]}</dd>
       <dt>{labels.version}</dt>
