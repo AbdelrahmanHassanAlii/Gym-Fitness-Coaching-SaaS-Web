@@ -20,7 +20,10 @@ export async function publishSupportAuthority(
   start: PlatformEffectiveAccessDecisionsDto,
   isCurrent: () => boolean,
 ): Promise<boolean> {
-  const contextKey = platformAccessKeys.context(actor);
+  const contextKey = platformAccessKeys.context({
+    principalId: actor.principalId,
+    sessionGeneration: actor.sessionGeneration,
+  });
   const current = queryClient.getQueryData<PlatformContextDto>(contextKey);
   const bindingMatches = () => {
     const latest = queryClient.getQueryData<PlatformContextDto>(contextKey);

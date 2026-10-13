@@ -134,7 +134,10 @@ export function SupportContextProvider({ children }: { children: ReactNode }) {
             runtime.getSnapshot().epoch === epoch
           ) {
             const latest = queryClient.getQueryData<PlatformContextDto>(
-              platformAccessKeys.context(captured),
+              platformAccessKeys.context({
+                principalId: captured.principalId,
+                sessionGeneration: captured.sessionGeneration,
+              }),
             );
             if (
               latest?.membership.status === "ACTIVE" &&

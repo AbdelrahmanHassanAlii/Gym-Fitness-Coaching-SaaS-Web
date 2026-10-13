@@ -342,6 +342,61 @@ it("preserves the existing session only after new-version start and current-cont
     ),
   ).toBe(true);
 });
+it("publishes v8 management ALLOW into actual PlatformAuthority after provider rediscovery", async () => {
+  render(tree());
+  await start();
+  expect(screen.getByTestId("authority-version")).toHaveTextContent("7");
+  const detailReadsBefore = request.mock.calls.filter(
+    ([o]) => o.path === `/platform/support/sessions/${sessionId}`,
+  ).length;
+  const contextReadsBefore = request.mock.calls.filter(
+    ([o]) => o.path === "/me/support-context",
+  ).length;
+  accessVersion = 8;
+  fireEvent(window, new Event("focus"));
+  await waitFor(() =>
+    expect(screen.getByTestId("authority-version")).toHaveTextContent("8"),
+  );
+  await waitFor(() => {
+    expect(screen.getByTestId("runtime")).toHaveTextContent("active");
+    for (const permission of all)
+      expect(screen.getByTestId("capabilities")).toHaveTextContent(
+        `${permission}:true`,
+      );
+  });
+  const endActions = await screen.findAllByRole("button", {
+    name: "End Support",
+  });
+  expect(endActions).toHaveLength(2);
+  for (const action of endActions) expect(action).toBeEnabled();
+  expect(
+    await screen.findByRole("button", { name: "Revoke Support Access" }),
+  ).toBeEnabled();
+  expect(
+    request.mock.calls.filter(
+      ([o]) => o.path === `/platform/support/sessions/${sessionId}`,
+    ).length,
+  ).toBeGreaterThan(detailReadsBefore);
+  const contextReads = request.mock.calls.filter(
+    ([o]) => o.path === "/me/support-context",
+  );
+  expect(contextReads.length).toBeGreaterThan(contextReadsBefore);
+  expect(contextReads.at(-1)?.[0].supportSessionId).toBe(sessionId);
+  for (const count of [1, 3])
+    expect(
+      request.mock.calls.some(
+        ([o]) =>
+          o.path === "/platform/me/effective-access/decisions" &&
+          o.body.expectedAccessVersion === 8 &&
+          o.body.requests.length === count,
+      ),
+    ).toBe(true);
+  expect(
+    request.mock.calls.filter(
+      ([o]) => o.path === "/platform/support/access-requests",
+    ),
+  ).toHaveLength(1);
+});
 it.each(["support.sessions.end_own", "support.sessions.revoke", "all"])(
   "real provider removes %s management actions without ejecting support",
   async (lost) => {
@@ -460,7 +515,9 @@ it.each(["decision", "context"])(
     });
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(release).toBeDefined());
-    expect(screen.getByTestId("runtime")).toHaveTextContent("pending");
+    await waitFor(() =>
+      expect(screen.getByTestId("runtime")).toHaveTextContent("pending"),
+    );
     expect(screen.queryByLabelText("Support Access")).not.toBeInTheDocument();
     expect(screen.getByTestId("landing")).not.toHaveTextContent(
       "Integration Gym",
@@ -495,55 +552,65 @@ it.each(["decision", "context"])(
     );
   },
 );
-it("late v8 rediscovery cannot overwrite a newer v9 authority and selected context", async () => {
-  render(tree());
-  await start();
-  accessVersion = 8;
-  const original = request.getMockImplementation()! as (o: {
-    path: string;
-  }) => Promise<unknown>;
-  let release!: () => void;
-  request.mockImplementation((o) => {
-    if (
-      o.path === "/platform/me/effective-access/decisions" &&
-      o.body.expectedAccessVersion === 8 &&
-      o.body.requests.length === 1
-    ) {
-      const response = original(o);
-      return new Promise((resolve) => {
-        release = () => {
-          void response.then(resolve);
-        };
-      });
-    }
-    return original(o);
-  });
-  fireEvent(window, new Event("focus"));
-  await waitFor(() => expect(release).toBeDefined());
-  accessVersion = 9;
-  permissions = ["support.sessions.start"];
-  fireEvent.click(
-    screen.getByRole("button", { name: "Refresh Platform authority" }),
-  );
-  await waitFor(() =>
-    expect(screen.getByTestId("authority-version")).toHaveTextContent("9"),
-  );
-  await act(async () => {
-    release();
-  });
-  await waitFor(() =>
-    expect(screen.getByTestId("runtime")).toHaveTextContent("active"),
-  );
-  expect(screen.getByTestId("capabilities")).toHaveTextContent(
-    "support.sessions.read:false",
-  );
-  expect(screen.getByTestId("authority-version")).toHaveTextContent("9");
-  expect(screen.getByLabelText("Support Access")).toHaveTextContent(
-    "Integration Gym",
-  );
-  expect(
-    request.mock.calls.filter(
-      ([o]) => o.path === "/platform/support/access-requests",
-    ),
-  ).toHaveLength(1);
-});
+it.each([
+  [7, 8],
+  [8, 9],
+])(
+  "late v%i rediscovery cannot overwrite newer v%i authority and selected context",
+  async (olderVersion, newerVersion) => {
+    render(tree());
+    await start();
+    accessVersion = olderVersion;
+    const original = request.getMockImplementation()! as (o: {
+      path: string;
+    }) => Promise<unknown>;
+    let release!: () => void;
+    request.mockImplementation((o) => {
+      if (
+        o.path === "/platform/me/effective-access/decisions" &&
+        o.body.expectedAccessVersion === olderVersion &&
+        o.body.requests.length === 1
+      ) {
+        const response = original(o);
+        return new Promise((resolve) => {
+          release = () => {
+            void response.then(resolve);
+          };
+        });
+      }
+      return original(o);
+    });
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(release).toBeDefined());
+    accessVersion = newerVersion;
+    permissions = ["support.sessions.start"];
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh Platform authority" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("authority-version")).toHaveTextContent(
+        String(newerVersion),
+      ),
+    );
+    await act(async () => {
+      release();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("runtime")).toHaveTextContent("active"),
+    );
+    expect(screen.getByTestId("capabilities")).toHaveTextContent(
+      "support.sessions.read:false",
+    );
+    expect(screen.getByTestId("authority-version")).toHaveTextContent(
+      String(newerVersion),
+    );
+    expect(screen.getByLabelText("Support Access")).toHaveTextContent(
+      "Integration Gym",
+    );
+    expect(
+      request.mock.calls.filter(
+        ([o]) => o.path === "/platform/support/access-requests",
+      ),
+    ).toHaveLength(1);
+  },
+);
