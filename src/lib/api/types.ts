@@ -22,6 +22,9 @@ export interface ApiRequestOptions<
   credentials?: RequestCredentials;
   refreshOnUnauthorized?: boolean;
   cache?: RequestCache;
+  decodeError?: (value: unknown) => {
+    error: { code: string; message: string };
+  };
 }
 
 export interface CookieRefreshOptions {
@@ -48,6 +51,7 @@ export interface ApiClient {
 }
 
 export interface NormalizedRequestOptions {
+  decodeError?: ApiRequestOptions["decodeError"];
   cache?: RequestCache;
   accessToken?: string | null;
   body?: unknown;

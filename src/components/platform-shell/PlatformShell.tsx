@@ -36,6 +36,8 @@ import {
 } from "@/lib/platform-access";
 import { ThemeControls } from "@/theme/ThemeControls";
 import styles from "./platform-shell.module.css";
+import { useDataManagementDecisions } from "@/lib/data-management/platform-decisions";
+import { getDataManagementLabels } from "@/i18n/data-management";
 
 export interface PlatformShellLabels {
   account: { logout: string; restricted: string };
@@ -162,6 +164,18 @@ export function PlatformShell({
           })
         : null,
     [activeMembership, generation, principalId, decisionRequests],
+  );
+  const deletionDecisions = useDataManagementDecisions(
+    apiClient,
+    contextEnabled && activeMembership && principalId && !isRecovering
+      ? {
+          principalId,
+          sessionGeneration: generation,
+          membershipId: activeMembership.id,
+          accessVersion: activeMembership.accessVersion,
+        }
+      : null,
+    pathname.startsWith("/platform/data-management"),
   );
   const decisionsQuery = useQuery({
     enabled:
@@ -290,7 +304,11 @@ export function PlatformShell({
   }, [decisionKey, queryClient]);
 
   useEffect(() => {
-    const errors = [contextQuery.error, decisionsQuery.error];
+    const errors = [
+      contextQuery.error,
+      decisionsQuery.error,
+      deletionDecisions.error,
+    ];
     if (
       errors.some(
         (error) => isApiError(error) && error.category === "unauthenticated",
@@ -302,26 +320,42 @@ export function PlatformShell({
         ) as Parameters<typeof markSessionExpired>[0],
       );
     }
-  }, [contextQuery.error, decisionsQuery.error, markSessionExpired]);
+  }, [
+    contextQuery.error,
+    decisionsQuery.error,
+    deletionDecisions.error,
+    markSessionExpired,
+  ]);
 
   useEffect(() => {
-    const error = decisionsQuery.error;
+    const deletionConflict = isPlatformAccessVersionConflict(
+      deletionDecisions.error,
+    );
+    const error = deletionConflict
+      ? deletionDecisions.error
+      : decisionsQuery.error;
+    const errorUpdatedAt = deletionConflict
+      ? deletionDecisions.errorUpdatedAt
+      : decisionsQuery.errorUpdatedAt;
     const shouldRediscover =
       isPlatformAccessVersionConflict(error) ||
       (isApiError(error) &&
         error.kind === "backend" &&
         error.code === "PLATFORM_MEMBERSHIP_INACTIVE");
-    if (
-      !shouldRediscover ||
-      decisionsQuery.errorUpdatedAt === handledRecoveryError.current
-    ) {
+    if (!shouldRediscover || errorUpdatedAt === handledRecoveryError.current) {
       return;
     }
 
-    handledRecoveryError.current = decisionsQuery.errorUpdatedAt;
+    handledRecoveryError.current = errorUpdatedAt;
     setRecovering(true);
     void refetchContext().finally(() => setRecovering(false));
-  }, [decisionsQuery.error, decisionsQuery.errorUpdatedAt, refetchContext]);
+  }, [
+    decisionsQuery.error,
+    decisionsQuery.errorUpdatedAt,
+    deletionDecisions.error,
+    deletionDecisions.errorUpdatedAt,
+    refetchContext,
+  ]);
 
   const decisionIdentity = decisionFingerprint(
     decisionsQuery.data,
@@ -479,6 +513,7 @@ export function PlatformShell({
         activeMembership!.accessVersion
     ) {
       await refetchDecisions();
+      await deletionDecisions.refetch();
       if (supportRoute) await startDecisionsQuery.refetch();
       if (supportRoute) await refetchManagement();
     }
@@ -486,6 +521,16 @@ export function PlatformShell({
   const authority = {
     accessVersion: activeMembership!.accessVersion,
     allows: (permission: PlatformFoundationPermission) => {
+      if (permission.startsWith("deletion.")) {
+        return (
+          !deletionDecisions.isError &&
+          !deletionDecisions.isFetching &&
+          !isDecisionExpired(deletionDecisions.data) &&
+          deletionDecisions.data?.decisions.some(
+            (d) => d.permission === permission && d.allowed,
+          ) === true
+        );
+      }
       if (supportRoute && permission.startsWith("support.")) {
         if (
           supportSnapshot?.revalidating ||
@@ -514,6 +559,7 @@ export function PlatformShell({
     refresh: refreshAuthority,
     sessionGeneration: generation,
     validUntil: decisionsQuery.data!.validUntil,
+    deletionValidUntil: deletionDecisions.data?.validUntil,
     supportStartDecision: supportRoute
       ? {
           allowed:
@@ -547,6 +593,20 @@ export function PlatformShell({
           <strong>Hassan</strong>
         </div>
         <nav aria-label={labels.portalLabel} className={styles.nav}>
+          {authority.allows("deletion.read") ? (
+            <Link
+              className={styles.navLink}
+              href="/platform/data-management"
+              onClick={() => setMenuOpen(false)}
+              aria-current={
+                pathname.startsWith("/platform/data-management")
+                  ? "page"
+                  : undefined
+              }
+            >
+              {getDataManagementLabels(locale).title}
+            </Link>
+          ) : null}
           <Link
             className={styles.navLink}
             href="/platform/support"

@@ -29,6 +29,7 @@ import {
 import { appQueryKeys } from "@/lib/server-state";
 import { ThemeControls } from "@/theme/ThemeControls";
 import styles from "./staff-shell.module.css";
+import { getDataManagementLabels } from "@/i18n/data-management";
 
 type StaffShellLabels = {
   account: {
@@ -231,6 +232,17 @@ export function StaffShell({
           <strong>Hassan</strong>
         </div>
         <nav aria-label={labels.portalLabel} className={styles.nav}>
+          {context?.accessContext === "user" ? (
+            <Link
+              className={styles.navLink}
+              href="/app/data-management"
+              aria-current={
+                pathname === "/app/data-management" ? "page" : undefined
+              }
+            >
+              {getDataManagementLabels(locale).exportTitle}
+            </Link>
+          ) : null}
           {navigation.map((item) =>
             item.href && item.status === "allowed" ? (
               <Link
@@ -408,6 +420,15 @@ export function currentUserDecisionRequestsForPath(
     "workspace.read",
   ] satisfies PermissionKey[]) {
     requests.set(permission, workspaceRequest(permission));
+  }
+
+  if (pathname === "/app/data-management") {
+    for (const permission of [
+      "exports.workspace.read",
+      "exports.workspace.create",
+      "exports.workspace.download",
+    ] satisfies PermissionKey[])
+      requests.set(permission, workspaceRequest(permission));
   }
 
   if (pathname.startsWith("/app/workspace")) {

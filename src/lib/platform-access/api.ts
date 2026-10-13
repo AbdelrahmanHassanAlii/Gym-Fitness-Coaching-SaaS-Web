@@ -24,6 +24,7 @@ export const platformDecisionRequests = Object.freeze(
         permission !== "subscriptions.read" &&
         permission !== "platform_users.manage" &&
         permission !== "platform_permissions.manage" &&
+        !permission.startsWith("deletion.") &&
         !permission.startsWith("support."),
     )
     .map((permission) => Object.freeze({ permission })),

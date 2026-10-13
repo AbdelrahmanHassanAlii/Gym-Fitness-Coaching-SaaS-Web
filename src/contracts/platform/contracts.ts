@@ -8,6 +8,10 @@ export const platformMembershipStatuses = [
 ] as const;
 
 export const platformFoundationPermissions = [
+  "deletion.read",
+  "deletion.approve",
+  "deletion.postpone",
+  "deletion.cancel",
   "audit.platform.read",
   "platform_users.read",
   "platform_users.manage",

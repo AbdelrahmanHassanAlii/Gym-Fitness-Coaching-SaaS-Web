@@ -71,6 +71,7 @@ class FetchApiClient implements ApiClient {
 
     return {
       cache: options.cache,
+      decodeError: options.decodeError,
       accessToken,
       body: options.body,
       credentials: options.credentials ?? this.credentials,
@@ -112,7 +113,7 @@ class FetchApiClient implements ApiClient {
       throw normalizeFetchFailure(error);
     }
 
-    return parseApiResponse<TResponse>(response);
+    return parseApiResponse<TResponse>(response, options.decodeError);
   }
 
   private shouldRefreshAfterError<TBody, TQuery extends QueryParams>(
@@ -197,6 +198,7 @@ class FetchApiClient implements ApiClient {
 
 export async function parseApiResponse<TResponse>(
   response: Response,
+  decodeError?: ApiRequestOptions["decodeError"],
 ): Promise<TResponse> {
   if (response.status === 204) {
     return undefined as TResponse;
@@ -243,6 +245,10 @@ export async function parseApiResponse<TResponse>(
   }
 
   if (!response.ok) {
+    if (decodeError)
+      return Promise.reject(
+        createBackendApiError(response.status, decodeError(parsed)),
+      );
     if (isApiErrorEnvelope(parsed)) {
       throw createBackendApiError(response.status, parsed);
     }

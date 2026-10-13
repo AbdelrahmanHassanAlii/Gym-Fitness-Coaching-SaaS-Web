@@ -157,7 +157,9 @@ for (const [status, action] of [
     ).toBeFocused();
     await page.getByRole("button", { name: action, exact: true }).click();
     await dialog.getByRole("button", { name: action, exact: true }).click();
-    await expect(page.getByRole("status")).toHaveText("Access changed.");
+    await expect(page.locator("main").getByRole("status")).toHaveText(
+      "Access changed.",
+    );
     await expect(
       page.getByRole("heading", { name: "Lifecycle management" }),
     ).toBeFocused();

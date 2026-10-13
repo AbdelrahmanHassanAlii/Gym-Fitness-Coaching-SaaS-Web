@@ -19,6 +19,7 @@ import type {
 import { platformWorkspaceStatuses } from "@/contracts";
 import { getLocaleDirection, type Locale } from "@/i18n/locales";
 import { getSupportLabels } from "@/i18n/support";
+import { getDataManagementLabels } from "@/i18n/data-management";
 import { isApiError } from "@/lib/api";
 import { useAuthSession } from "@/lib/auth";
 import {
@@ -222,6 +223,11 @@ export function PlatformWorkspaceDetail({
       <header>
         <p className={styles.eyebrow}>{labels.title}</p>
         <h1 id="platform-workspace-detail-title">{workspace.name}</h1>
+        {authority.allows("deletion.read") ? (
+          <Link href="/platform/data-management">
+            {getDataManagementLabels(locale).title}
+          </Link>
+        ) : null}
         <Link href={`/platform/workspaces/${workspace.id}/support`}>
           {getSupportLabels(locale).title}
         </Link>

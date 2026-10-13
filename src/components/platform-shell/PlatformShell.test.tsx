@@ -65,6 +65,17 @@ vi.mock("@/lib/auth", () => ({
   useAuthSession: () => mocks.authSession as unknown as AuthSessionContextValue,
 }));
 
+// These frozen WEB-021 regressions isolate the independently requested WEB-023
+// navigation decision. The real deletion decision flow is exercised by WEB-023 E2E.
+vi.mock("@/lib/data-management/platform-decisions", () => ({
+  useDataManagementDecisions: () => ({
+    data: undefined,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }),
