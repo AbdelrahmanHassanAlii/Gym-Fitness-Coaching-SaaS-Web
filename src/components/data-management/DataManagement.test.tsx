@@ -123,6 +123,89 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("native export behavior", () => {
+  test("empty-to-nonempty refresh restores the returned older-export cursor", async () => {
+    const row = { ...exportRow, status: "EXPIRED" };
+    mocks.request
+      .mockResolvedValueOnce(list([]))
+      .mockResolvedValueOnce(list([row], "cursor-1"))
+      .mockResolvedValueOnce(list([]));
+    exportsPage();
+    await screen.findByText(en.emptyExports);
+    expect(screen.queryByText(en.olderExports)).toBeNull();
+    fireEvent.click(screen.getByText(en.refresh));
+    await screen.findByText(en.statuses.EXPIRED);
+    fireEvent.click(await screen.findByText(en.olderExports));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(3));
+    expect(mocks.request.mock.calls[2][0].query.cursor).toBe("cursor-1");
+  });
+  test("exhausted pagination recovers a new cursor on refresh", async () => {
+    const row = { ...exportRow, status: "EXPIRED" };
+    mocks.request
+      .mockResolvedValueOnce(list([row], "cursor-1"))
+      .mockResolvedValueOnce(list([]))
+      .mockResolvedValueOnce(list([row], "cursor-2"))
+      .mockResolvedValueOnce(list([]));
+    exportsPage();
+    fireEvent.click(await screen.findByText(en.olderExports));
+    await waitFor(() => expect(screen.queryByText(en.olderExports)).toBeNull());
+    expect(mocks.request.mock.calls[1][0].query.cursor).toBe("cursor-1");
+    fireEvent.click(screen.getByText(en.refresh));
+    fireEvent.click(await screen.findByText(en.olderExports));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(4));
+    expect(mocks.request.mock.calls[3][0].query.cursor).toBe("cursor-2");
+  });
+  test("refresh preserves an actively progressing older-page cursor", async () => {
+    const row = { ...exportRow, status: "EXPIRED" };
+    mocks.request
+      .mockResolvedValueOnce(list([row], "cursor-1"))
+      .mockResolvedValueOnce(list([], "cursor-in-progress"))
+      .mockResolvedValueOnce(list([row], "new-head-cursor"))
+      .mockResolvedValueOnce(list([]));
+    exportsPage();
+    fireEvent.click(await screen.findByText(en.olderExports));
+    await waitFor(() => expect(screen.getByText(en.refresh)).toBeEnabled());
+    fireEvent.click(screen.getByText(en.refresh));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(screen.getByText(en.olderExports)).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByText(en.olderExports));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(4));
+    expect(mocks.request.mock.calls[3][0].query.cursor).toBe(
+      "cursor-in-progress",
+    );
+  });
+  test("late refresh cannot replace a newer accepted export cursor", async () => {
+    let resolveOld!: (value: unknown) => void;
+    const row = { ...exportRow, status: "EXPIRED", version: 8 };
+    mocks.request
+      .mockResolvedValueOnce(list([row], "initial-cursor"))
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveOld = done;
+          }),
+      )
+      .mockResolvedValueOnce(list([row], "current-cursor"))
+      .mockResolvedValueOnce(list([]));
+    exportsPage();
+    await screen.findByText(en.olderExports);
+    fireEvent.click(screen.getByText(en.refresh));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(screen.getByText(en.olderExports)).toBeEnabled(),
+    );
+    await act(async () =>
+      resolveOld(list([{ ...row, version: 7 }], "obsolete-cursor")),
+    );
+    fireEvent.click(screen.getByText(en.olderExports));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(4));
+    expect(mocks.request.mock.calls[3][0].query.cursor).toBe("current-cursor");
+  });
   test("cursor remains available despite hasMore false and no total/completeness claim", async () => {
     mocks.request
       .mockResolvedValueOnce(list([exportRow], "older"))

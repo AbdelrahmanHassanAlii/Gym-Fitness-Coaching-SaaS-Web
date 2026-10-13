@@ -195,10 +195,9 @@ export function NativeExports({
       if (!guard.alive() || !guard.current(ticket)) return;
       accept([...page.items, ...details]);
       // Preserve the explicit pagination position when refreshing the newest page.
-      if (!paginationStarted.current) {
+      if (!paginationStarted.current || cursorRef.current === null) {
         cursorRef.current = page.nextCursor;
         setCursor(page.nextCursor);
-        paginationStarted.current = true;
       }
       setError(null);
       blockedRef.current = false;
@@ -242,6 +241,7 @@ export function NativeExports({
       const page = await listExports(apiClient, workspaceId, cursor);
       if (guard.alive() && guard.current(ticket)) {
         accept(page.items);
+        paginationStarted.current = true;
         cursorRef.current = page.nextCursor === cursor ? null : page.nextCursor;
         setCursor(cursorRef.current);
       }
